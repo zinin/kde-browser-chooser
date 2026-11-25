@@ -233,12 +233,11 @@ make_default() {
 }
 
 entry_exists() (
+	dirs=${XDG_DATA_HOME:-$HOME/.local/share}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}
+	dirs=$dirs:$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/var/lib/snapd/desktop
 	set -f
 	IFS=:
-	for dir in ${XDG_DATA_HOME:-$HOME/.local/share}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}; do
-		[ ! -e "$dir/applications/$1" ] || exit 0
-	done
-	for dir in "$HOME/.local/share/flatpak/exports/share" /var/lib/flatpak/exports/share /var/lib/snapd/desktop; do
+	for dir in $dirs; do
 		[ ! -e "$dir/applications/$1" ] || exit 0
 	done
 	exit 1
