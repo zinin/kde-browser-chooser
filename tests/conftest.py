@@ -37,3 +37,41 @@ def env(tmp_path, apps, monkeypatch):
     monkeypatch.setattr(desktop, "EXTRA_DATA_DIRS", ())
     return {"HOME": str(tmp_path / "home"), "PATH": "/usr/bin:/bin", "XDG_CURRENT_DESKTOP": "KDE",
             "XDG_DATA_HOME": str(apps.user), "XDG_DATA_DIRS": str(apps.system)}
+
+
+class Fakes:
+    """Fake external commands that record their arguments and stdin; nothing else is in PATH."""
+
+    def __init__(self, root):
+        self.root = root
+        self.bin = root / "fake-bin"
+        self.bin.mkdir()
+
+    def add(self, name, out="", code=0):
+        script = self.bin / name
+        script.write_text(
+            "#!/bin/bash\n"
+            f"{{ for a in \"$@\"; do printf '%s\\0' \"$a\"; done; printf '\\001'; }} >> '{self.root}/{name}.calls'\n"
+            + (f"/usr/bin/cat > '{self.root}/{name}.stdin'\n" if name == "wl-copy" else "")
+            + f"printf '%s' '{out}'\nexit {code}\n")
+        script.chmod(0o755)
+
+    def calls(self, name):
+        try:
+            text = (self.root / f"{name}.calls").read_text()
+        except FileNotFoundError:
+            return []
+        return [call.split("\0")[:-1] for call in text.split("\1")[:-1]]
+
+    def args(self, name):
+        return self.calls(name)[-1]
+
+    def stdin(self, name):
+        return (self.root / f"{name}.stdin").read_bytes()
+
+
+@pytest.fixture
+def fakes(tmp_path, monkeypatch):
+    fakes = Fakes(tmp_path)
+    monkeypatch.setenv("PATH", str(fakes.bin))
+    return fakes
