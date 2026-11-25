@@ -6,7 +6,8 @@ with a link; it clicks the link and a tile with real input events, sent through 
 the browser whether it became active. The last line must be `False`: there the program is stripped
 of its request for a fresh token, so the bench is able to notice a failure.
 
-It needs Plasma 6, libei, python3-gi and PyQt6, and runs on the developer's machine, not in CI.
+It needs Plasma 6, libei, python3-gi and PyQt6, and runs on the developer's machine, not in CI. The
+program, and whatever it starts, sees a HOME of its own inside the work directory.
 
 Two traps, both already avoided in `nested.sh`:
 

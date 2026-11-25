@@ -9,7 +9,7 @@ python3 "$here/../../tools/build.py" --out "$work/dist" 2>/dev/null
 python3 "$here/strip_token.py" "$work/dist/kde-browser-chooser" "$work/dist/stripped"
 chmod +x "$work/dist/stripped"
 
-mkdir -p "$work"/{bin,data/applications,config/kde-browser-chooser,state/kde-browser-chooser}
+mkdir -p "$work"/{bin,data/applications,config/kde-browser-chooser,state/kde-browser-chooser,home}
 # shellcheck disable=SC2016 # expands in the fake browser
 printf '#!/bin/sh\nprintf "%%s\\n" "$XDG_ACTIVATION_TOKEN" >"%s"\n' "$work/fifo" >"$work/bin/fake-browser"
 printf '[Desktop Entry]\nType=Application\nName=Fake\nExec=%s %%u\nMimeType=x-scheme-handler/https;\n' \
@@ -23,7 +23,7 @@ echo fakebrowser >"$work/state/kde-browser-chooser/last"
 run() { # run NAME WANT SCENARIO PROGRAM...
 	local name=$1 want=$2 scenario=$3
 	shift 3
-	printf '#!/bin/sh\nexec %s "$@"\n' "$*" >"$work/bin/xdg-open"
+	printf '#!/bin/sh\nexec env HOME=%s %s "$@"\n' "$work/home" "$*" >"$work/bin/xdg-open"
 	chmod +x "$work/bin"/*
 	rm -f "$work/result"
 	"$here/nested.sh" "$work" 1 "$here/scenario.sh" "$work" "$scenario" || true
