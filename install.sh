@@ -1,0 +1,330 @@
+#!/bin/sh
+# install.sh installs kde-browser-chooser for the current user from its GitHub releases:
+#
+#   curl -fsSL https://raw.githubusercontent.com/zinin/kde-browser-chooser/master/install.sh | sh
+#
+# It checks the download against the release's SHA256SUMS, puts the program into
+# ~/.local/bin and offers to install PyQt6 and to make the program the default
+# browser. Run it again to update. "| sh -s -- --uninstall" removes the program
+# and brings back the previous default browser. KBC_VERSION picks another release,
+# such as 0.1.0, and KBC_INSTALL_DIR another directory for the program.
+set -eu
+
+repo=zinin/kde-browser-chooser
+app=kde-browser-chooser
+ours=$app.desktop
+keys='x-scheme-handler/http x-scheme-handler/https text/html application/xhtml+xml kdeglobals'
+by_hand='System Settings, Default Applications, Web browser'
+
+say() {
+	echo "$app: $*"
+}
+
+fail() {
+	echo "$app: $*" >&2
+	exit 1
+}
+
+usage() {
+	cat <<USAGE
+Usage: install.sh [--yes] [--no-default] [--version X]
+       install.sh --uninstall [--purge]
+
+  --yes         take the suggested answer to every question
+  --no-default  do not offer to make the program the default browser
+  --version X   install the release X instead of the latest
+  --uninstall   remove the program and bring back the previous default browser
+  --purge       with --uninstall: remove the settings too
+USAGE
+}
+
+has() {
+	command -v "$1" >/dev/null 2>&1
+}
+
+# ask puts the question $1; the letter $2, y or n, is the answer of Enter and of --yes.
+ask() {
+	if [ "$yes" = 1 ]; then
+		[ "$2" = y ]
+		return
+	fi
+	if [ "$tty" = 0 ]; then
+		say "$1 There is no terminal to ask on, so no; --yes takes the suggested answers."
+		return 1
+	fi
+	if [ "$2" = y ]; then hint='[Y/n]'; else hint='[y/N]'; fi
+	printf '%s: %s %s ' "$app" "$1" "$hint"
+	read -r answer <&3 || answer=
+	case ${answer:-$2} in
+	[Yy]*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+# fetch downloads the URL $1 into the file $2.
+fetch() {
+	if has curl; then
+		curl -fsSL -o "$2" "$1"
+	elif has wget; then
+		wget -q -O "$2" "$1"
+	else
+		fail "neither curl nor wget is installed"
+	fi
+}
+
+check_system() {
+	[ "$(uname -s)" = Linux ] || fail "it runs only on Linux"
+	[ "$(id -u)" -ne 0 ] || fail "run it as the user who clicks the links, not as root"
+	[ -n "${HOME:-}" ] || fail "HOME is not set"
+}
+
+check_desktop() {
+	case ${XDG_CURRENT_DESKTOP:-} in
+	*KDE*) return ;;
+	esac
+	if has plasmashell; then return; fi
+	say "this does not look like KDE Plasma, the only desktop it is made for."
+	ask "Install it anyway?" n || fail "nothing is installed"
+}
+
+check_python() {
+	"$python" -I -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null ||
+		fail "it needs Python 3.11 or later as /usr/bin/python3"
+}
+
+has_pyqt() {
+	"$python" -I -c 'import PyQt6.QtWidgets' 2>/dev/null
+}
+
+ensure_pyqt() {
+	if has_pyqt; then return; fi
+	if [ -e "${KBC_SYSROOT:-}/run/ostree-booted" ]; then
+		say "PyQt6 is missing; add it with: rpm-ostree install python3-pyqt6"
+		return
+	fi
+	if has apt-get; then
+		install='apt-get install -y python3-pyqt6'
+	elif has dnf; then
+		install='dnf install -y python3-pyqt6'
+	elif has pacman; then
+		install='pacman -S --needed --noconfirm python-pyqt6'
+	elif has zypper; then
+		install='zypper --non-interactive install python3-PyQt6'
+	else
+		say "PyQt6 is missing; install it for /usr/bin/python3 with your package manager."
+		return
+	fi
+	if ! has sudo; then
+		say "PyQt6 is missing; install it as root: $install"
+		return
+	fi
+	say "PyQt6, which draws the window, is missing."
+	if ask "Run \"sudo $install\"?" y; then
+		# shellcheck disable=SC2086 # a command and its arguments
+		sudo $install </dev/null || true
+	fi
+	has_pyqt || say "there is still no PyQt6, so there will be no window."
+}
+
+download() {
+	if [ -n "${KBC_BASE_URL:-}" ]; then
+		base=$KBC_BASE_URL
+	elif [ -n "$version" ]; then
+		base="https://github.com/$repo/releases/download/v${version#v}"
+	else
+		base="https://github.com/$repo/releases/latest/download"
+	fi
+	for file in SHA256SUMS "$app" "$ours"; do
+		fetch "$base/$file" "$tmp/$file" || fail "cannot download $base/$file"
+	done
+	for file in "$app" "$ours"; do
+		want=$(awk -v name="$file" '$2 == name { print $1 }' "$tmp/SHA256SUMS")
+		got=$(sha256sum "$tmp/$file" | awk '{ print $1 }')
+		if [ -z "$want" ] || [ "$got" != "$want" ]; then
+			fail "$file does not match its SHA256SUMS"
+		fi
+	done
+}
+
+# exec_value quotes the path $1 for Exec as the Desktop Entry Specification wants it.
+exec_value() {
+	case $1 in
+	*[!A-Za-z0-9/._+-]*) printf '"%s"' "$(printf '%s' "$1" | sed -e 's/["`$]/\\\\&/g' -e 's/%/%%/g')" ;;
+	*) printf '%s' "$1" ;;
+	esac
+}
+
+refresh() {
+	if has update-desktop-database; then update-desktop-database "$apps_dir" >/dev/null 2>&1 || true; fi
+	if has kbuildsycoca6; then kbuildsycoca6 >/dev/null 2>&1 || true; fi
+}
+
+place() {
+	mkdir -p "$bin_dir" "$apps_dir"
+	cp "$tmp/$app" "$bin_dir/.$app.new"
+	chmod 755 "$bin_dir/.$app.new"
+	mv -f "$bin_dir/.$app.new" "$bin_dir/$app"
+	EXEC=$(exec_value "$bin_dir/$app") awk '
+		{ at = index($0, "@EXEC@") }
+		at { $0 = substr($0, 1, at - 1) ENVIRON["EXEC"] substr($0, at + 6) }
+		{ print }' "$tmp/$ours" >"$apps_dir/.$ours.new"
+	mv -f "$apps_dir/.$ours.new" "$apps_dir/$ours"
+	refresh
+	installed=$("$bin_dir/$app" --version) || fail "$bin_dir/$app does not run on this system"
+	say "$installed is in $bin_dir"
+	case ":$PATH:" in
+	*":$bin_dir:"*) ;;
+	*) say "$bin_dir is not on your PATH; links open anyway." ;;
+	esac
+}
+
+# current prints what is the default for the key $1 now, and recorded what it was before us.
+current() {
+	case $1 in
+	kdeglobals) kreadconfig6 --file kdeglobals --group General --key BrowserApplication 2>/dev/null || true ;;
+	*) xdg-mime query default "$1" 2>/dev/null || true ;;
+	esac
+}
+
+recorded() {
+	if [ -e "$state_dir/previous-defaults" ]; then
+		awk -v key="$1=" 'index($0, key) == 1 { print substr($0, length(key) + 1) }' "$state_dir/previous-defaults"
+	fi
+}
+
+save_previous() {
+	mkdir -p "$state_dir"
+	for key in $keys; do
+		value=$(current "$key")
+		if [ "$value" = "$ours" ]; then value=$(recorded "$key"); fi
+		if [ -n "$value" ]; then echo "$key=$value"; fi
+	done >"$state_dir/previous-defaults.new"
+	mv -f "$state_dir/previous-defaults.new" "$state_dir/previous-defaults"
+}
+
+is_default() {
+	[ "$(xdg-settings get default-web-browser 2>/dev/null || true)" = "$ours" ]
+}
+
+make_default() {
+	if ! has xdg-settings; then
+		say "there is no xdg-settings; make it the default browser in $by_hand."
+		return
+	fi
+	if is_default; then return; fi
+	suggested=y
+	if ! has_pyqt; then
+		if ! has kdialog; then
+			say "it cannot be the default browser without PyQt6 or kdialog: it would have nothing to show."
+			return
+		fi
+		say "without PyQt6 it shows a plain list, and a running browser may stay behind other windows."
+		suggested=n
+	fi
+	ask "Make it the default browser?" "$suggested" || return 0
+	save_previous
+	xdg-settings set default-web-browser "$ours" 2>/dev/null || true
+	xdg-mime default "$ours" application/xhtml+xml 2>/dev/null || true
+	if is_default; then
+		say "it is the default browser now; programs already running may need a restart."
+	else
+		say "that had no effect; make it the default browser in $by_hand."
+	fi
+}
+
+entry_exists() (
+	set -f
+	IFS=:
+	for dir in ${XDG_DATA_HOME:-$HOME/.local/share}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}; do
+		[ ! -e "$dir/applications/$1" ] || exit 0
+	done
+	for dir in "$HOME/.local/share/flatpak/exports/share" /var/lib/flatpak/exports/share /var/lib/snapd/desktop; do
+		[ ! -e "$dir/applications/$1" ] || exit 0
+	done
+	exit 1
+)
+
+restore() {
+	case $1 in
+	kdeglobals) kwriteconfig6 --file kdeglobals --group General --key BrowserApplication "$2" ;;
+	*) xdg-mime default "$2" "$1" ;;
+	esac
+}
+
+uninstall() {
+	left=0
+	for key in $keys; do
+		if [ "$(current "$key")" != "$ours" ]; then continue; fi
+		value=$(recorded "$key")
+		if [ -z "$value" ] || ! entry_exists "$value" || ! restore "$key" "$value"; then left=1; fi
+	done
+	rm -f "$bin_dir/$app" "$apps_dir/$ours"
+	rm -rf "$state_dir"
+	if [ "$purge" = 1 ]; then rm -rf "$config_dir"; fi
+	refresh
+	if [ "$left" = 1 ]; then say "choose another default browser in $by_hand."; fi
+	say "removed"
+}
+
+main() {
+	yes=0 want_default=1 action=install purge=0 version=${KBC_VERSION:-}
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--yes) yes=1 ;;
+		--no-default) want_default=0 ;;
+		--uninstall) action=uninstall ;;
+		--purge) purge=1 ;;
+		--version)
+			if [ $# -lt 2 ]; then
+				usage >&2
+				exit 2
+			fi
+			version=$2
+			shift
+			;;
+		--help)
+			usage
+			exit
+			;;
+		*)
+			usage >&2
+			exit 2
+			;;
+		esac
+		shift
+	done
+
+	check_system
+	python=${KBC_PYTHON:-/usr/bin/python3}
+	bin_dir=${KBC_INSTALL_DIR:-$HOME/.local/bin}
+	apps_dir=${XDG_DATA_HOME:-$HOME/.local/share}/applications
+	state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/$app
+	config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/$app
+	if [ "$action" = uninstall ]; then
+		uninstall
+		return
+	fi
+
+	# With "curl | sh" the standard input is this script, so questions are asked on the terminal.
+	tty=0
+	terminal=${KBC_TTY:-/dev/tty}
+	if (: <"$terminal") 2>/dev/null; then
+		exec 3<"$terminal"
+		tty=1
+	fi
+	check_desktop
+	check_python
+	tmp=$(mktemp -d)
+	trap 'rm -rf "$tmp"' EXIT
+	trap 'exit 1' INT TERM
+	download
+	ensure_pyqt
+	place
+	if [ "$want_default" = 1 ]; then make_default; fi
+}
+
+# In braces, so that a download cut short runs nothing.
+{
+	main "$@"
+	exit
+}
