@@ -388,7 +388,7 @@ forget() {
 }
 
 uninstall() {
-	lost=0
+	lost=0 kdeglobals_unchanged=0
 	: >"$tmp/previous"
 	for key in $keys; do
 		if ! is_ours "$(chosen "$key")"; then continue; fi
@@ -396,9 +396,9 @@ uninstall() {
 		if [ "$key" != kdeglobals ]; then
 			echo "$key=$value" >>"$tmp/previous"
 		elif [ -n "$value" ]; then
-			kwriteconfig6 --file kdeglobals --group General --key BrowserApplication "$value" || lost=1
+			kwriteconfig6 --file kdeglobals --group General --key BrowserApplication "$value" || lost=1 kdeglobals_unchanged=1
 		else
-			kwriteconfig6 --file kdeglobals --group General --key BrowserApplication --delete "" || true
+			kwriteconfig6 --file kdeglobals --group General --key BrowserApplication --delete "" || lost=1 kdeglobals_unchanged=1
 		fi
 	done
 	forget "$tmp/previous"
@@ -420,6 +420,7 @@ uninstall() {
 		done <"$tmp/previous"
 	fi
 	if has xdg-mime && [ -z "$(xdg-mime query default x-scheme-handler/https 2>/dev/null)" ]; then lost=1; fi
+	if [ "$kdeglobals_unchanged" = 1 ]; then say "could not change BrowserApplication in kdeglobals."; fi
 	if [ "$lost" = 1 ]; then say "choose another default browser in $by_hand."; fi
 	say "removed"
 }

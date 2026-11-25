@@ -384,6 +384,23 @@ def test_uninstall_restores_an_entry_from_a_subdirectory(home):
     assert "System Settings" not in home.output
 
 
+@pytest.mark.parametrize("works", [True, False], ids=["works", "fails"])
+@pytest.mark.parametrize("recorded", [True, False], ids=["restored", "deleted"])
+def test_uninstall_tells_when_kdeglobals_cannot_change(fresh, recorded, works):
+    """BrowserApplication is either restored or deleted; Chrome is installed, so a browser stays effective."""
+    fresh.set("other", "chrome.desktop")
+    if recorded:
+        fresh.choose(ALL_CHROME)
+    assert fresh.run("--yes") == 0, fresh.output
+    if not works:
+        fresh.fake("kwriteconfig6", "exit 1")
+    assert fresh.run("--uninstall") == 0, fresh.output
+    told = "could not change BrowserApplication in kdeglobals."
+    assert fresh.output.count(told) == (0 if works else 1) and ("System Settings" in fresh.output) is not works
+    assert works or fresh.output.index(told) < fresh.output.index("System Settings")
+    assert not fresh.program.exists() and not fresh.previous.exists()
+
+
 def test_uninstall_nothing(home):
     assert home.run("--uninstall") == 0
     assert home.defaults() == ALL_CHROME

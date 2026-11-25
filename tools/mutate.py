@@ -102,6 +102,8 @@ MUTATIONS = [
     ("../../install.sh", "only the first entry of a list counts", 'case ";$1;" in', 'case ";${1%%;*};" in', "first_entry_is_gone"),
     ("../../install.sh", "xdg-utils turn a linked list into a file", 'if [ -n "$link_target" ] && [ ! -L "$mimeapps" ] && [ -f "$mimeapps" ]; then', "if false; then", "stay_linked"),
     ("../../install.sh", "a relative link becomes absolute", 'link_text=$(readlink -- "$mimeapps")', 'link_text=$(readlink -f -- "$mimeapps")', "stay_linked"),
+    ("../../install.sh", "a failed delete in kdeglobals is silent", '--delete "" || lost=1 kdeglobals_unchanged=1', '--delete "" || true', "kdeglobals_cannot_change"),
+    ("../../install.sh", "an unchanged kdeglobals goes unnamed", 'if [ "$kdeglobals_unchanged" = 1 ]; then say', "if false; then say", "kdeglobals_cannot_change"),
 ]
 
 
