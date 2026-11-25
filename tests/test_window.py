@@ -164,7 +164,7 @@ def test_arrows_follow_the_grid():
     assert seen == ["Google Chrome", "Opera", "Yandex", "Copy link"]
 
 
-@pytest.mark.parametrize("wait, want", [(30, None), (270, None), (345, CHROME)])
+@pytest.mark.parametrize("wait, want", [(30, None), (200, None), (345, CHROME)])
 def test_guard_is_300_ms(wait, want):
     assert drive(lambda d: click(d, "Google Chrome"), wait=wait) == want
 
@@ -264,6 +264,13 @@ def test_desktop_file_name():
     seen = []
     drive(lambda d: seen.append(QGuiApplication.desktopFileName()))
     assert seen == ["kde-browser-chooser"]
+
+
+def test_ampersand_in_a_title_is_not_a_shortcut():
+    shortcuts = []
+    drive(lambda d: shortcuts.extend(b.shortcut().toString() for b in buttons(d)),
+          tiles=[Tile("rb", "R&B", "", ("x", "%u"))])
+    assert shortcuts == ["", ""]
 
 
 class FakeExtras(QObject):
