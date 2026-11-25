@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,22 @@ def test_bom_is_accepted(write):
     ("x --url=%u -v", ("x", "--url=%u", "-v")), ("x 100%%", ("x", "100%%", "%U"))])
 def test_command(write, command, want):
     assert load(write(f"[[tile]]\nname = 'n'\ncommand = '{command}'")).tiles[0].command == want
+
+
+@pytest.mark.parametrize("command, want", [
+    ("chromium --app=%u", ("chromium", "--app=%u")), ('"/opt/my browser/run" %u', ("/opt/my browser/run", "%u")),
+    ("x '100%%u'", ("x", "100%%u", "%U")),
+    ("sh -c 'exec firefox \"$1\"' sh %u", ("sh", "-c", 'exec firefox "$1"', "sh", "%u"))])
+def test_command_with_quotes(write, command, want):
+    assert load(write(f"[[tile]]\nname = 'n'\ncommand = {json.dumps(command)}")).tiles[0].command == want
+
+
+@pytest.mark.parametrize("command", ["sh -c 'firefox %u'", 'sh -c "firefox %U"', "firefox \\%u", "x a'b'%F"])
+def test_link_code_inside_quotes(write, command):
+    with pytest.raises(ConfigError) as error:
+        load(write(f"[[tile]]\nname = 'Mine'\ncommand = {json.dumps(command)}"))
+    assert str(error.value) == ('"command" of "Mine": a link code inside quotes is not allowed; pass the link as an '
+                                'argument of its own, as in sh -c \'exec firefox "$1"\' sh %u')
 
 
 def test_id_comes_from_the_name(write):

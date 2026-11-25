@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from kde_browser_chooser.desktop import application_dirs, find_browsers, parse_exec
+from kde_browser_chooser.desktop import application_dirs, find_browsers, parse_exec, split_marked, split_words
 from kde_browser_chooser.model import Tile
 
 FIREFOX = dict(Type="Application", Name="Firefox", Exec="firefox %u", Icon="firefox",
@@ -18,7 +18,8 @@ def test_browser_found(apps, env):
     {"NoDisplay": "true"}, {"Hidden": "true"}, {"Terminal": "true"}, {"Type": "Link"},
     {"MimeType": "text/html;"}, {"MimeType": None}, {"OnlyShowIn": "GNOME;"}, {"NotShowIn": "XFCE;KDE;"},
     {"TryExec": "/nonexistent"}, {"TryExec": "no-such-program"}, {"Exec": "firefox"},
-    {"Exec": '"open %u'}, {"Exec": None}, {"Name": None}])
+    {"Exec": '"open %u'}, {"Exec": None}, {"Name": None},
+    {"Exec": "sh -c 'run %u'"}, {"Exec": 'sh -c "run %u"'}, {"Exec": "sh -c run\\ %u"}])
 def test_not_a_browser(apps, env, change):
     apps.add("firefox", **{**FIREFOX, **change})
     assert find_browsers(env, "en") == []
@@ -26,7 +27,7 @@ def test_not_a_browser(apps, env, change):
 
 @pytest.mark.parametrize("change", [
     {"OnlyShowIn": "GNOME;KDE;"}, {"NotShowIn": "GNOME;"}, {"TryExec": "sh"}, {"TryExec": "/bin/sh"},
-    {"NoDisplay": "false"}])
+    {"NoDisplay": "false"}, {"Exec": "browser --app=%u"}, {"Exec": '"/opt/my browser/run" %u'}])
 def test_still_a_browser(apps, env, change):
     apps.add("firefox", **{**FIREFOX, **change})
     assert len(find_browsers(env, "en")) == 1
@@ -116,8 +117,9 @@ def test_missing_directories_are_fine(env):
     ("x %d %m --a%n %u", ("x", "--a", "%u")),
     ("flatpak run o @@u %u @@", ("flatpak", "run", "o", "@@u", "%u", "@@")),
     (r'x "a\\"b" "\\$HOME" "\\`" %u', ("x", 'a"b', "$HOME", "`", "%u")),
-    ("sh -c 'run %u'", ("sh", "-c", "run %u")),
-    (r"x a\sb %u", ("x", "a", "b", "%u"))])
+    (r"x a\sb %u", ("x", "a", "b", "%u")),
+    ("x '100%%u' %u", ("x", "100%%u", "%u")),
+    ("sh -c 'exec run \"$1\"' sh %u", ("sh", "-c", 'exec run "$1"', "sh", "%u"))])
 def test_parse_exec(value, argv):
     assert parse_exec(value, icon="I", name="N", path="/p") == argv
 
@@ -130,7 +132,19 @@ def test_no_icon_no_icon_option():
     assert parse_exec("x %i %u", icon="", name="N", path="/p") == ("x", "%u")
 
 
-@pytest.mark.parametrize("value", ['x "open', "x 'open", ""])
+@pytest.mark.parametrize("text, words", [
+    ("sh -c 'run %u'", [("sh", False), ("-c", False), ("run %u", True)]),
+    ('a "b c"d e\\ f g\\', [("a", False), ("b cd", True), ("e f", True), ("g", True)]),
+    ("x %u --app=%u", [("x", False), ("%u", False), ("--app=%u", False)])])
+def test_split_marked(text, words):
+    """Each word tells whether a part of it was quoted or escaped; the words themselves are those of split_words."""
+    assert split_marked(text) == words
+    assert split_words(text) == [word for word, _ in words]
+
+
+# A link code in a word that was quoted or escaped would become part of the text the quotes protect.
+@pytest.mark.parametrize("value", ['x "open', "x 'open", "", "sh -c 'run %u'", 'sh -c "run %U"', r"sh -c run\ %u",
+                                   "x '%f'", "x pre'fix'%F", r"x \%u"])
 def test_parse_exec_rejects(value):
     with pytest.raises(ValueError):
         parse_exec(value, icon="", name="", path="")

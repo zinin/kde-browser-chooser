@@ -5,7 +5,7 @@ https://specifications.freedesktop.org/desktop-entry-spec/latest/
 import os
 import re
 import shutil
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
 from .model import Tile
@@ -34,10 +34,14 @@ def unescape(value: str) -> str:
     return re.sub(r"\\([sntr\\])", lambda match: ESCAPES[match[1]], value)
 
 
-def split_words(text: str) -> list[str]:
-    """Splits a command line; single quotes are not in the spec but do occur."""
-    words: list[str] = []
+def split_marked(text: str, blank: Callable[[str], bool] = str.isspace) -> list[tuple[str, bool]]:
+    """Splits a command line into words, each with whether a part of it was quoted or escaped.
+
+    Single quotes are not in the spec but do occur. blank tells the characters that part words.
+    """
+    words: list[tuple[str, bool]] = []
     word: str | None = None
+    marked = False
     quote = ""
     chars = iter(text)
     for char in chars:
@@ -50,29 +54,41 @@ def split_words(text: str) -> list[str]:
             else:
                 word += char
         elif char in "\"'":
-            quote, word = char, word or ""
-        elif char.isspace():
+            quote, word, marked = char, word or "", True
+        elif blank(char):
             if word is not None:
-                words.append(word)
-            word = None
+                words.append((word, marked))
+            word, marked = None, False
         else:
+            marked = marked or char == "\\"
             word = (word or "") + (next(chars, "") if char == "\\" else char)
     if quote:
         raise ValueError("unclosed quote")
     if word is not None:
-        words.append(word)
+        words.append((word, marked))
     return words
 
 
+def split_words(text: str) -> list[str]:
+    """Splits a command line; single quotes are not in the spec but do occur."""
+    return [word for word, _ in split_marked(text)]
+
+
 def parse_exec(value: str, *, icon: str, name: str, path: str) -> tuple[str, ...]:
-    """Splits Exec, leaving only %% and the URL codes unexpanded."""
+    """Splits Exec, leaving only %% and the URL codes unexpanded.
+
+    A URL code in a word that was quoted or escaped is refused: the link would become part of the text the quotes
+    protect, such as a shell script, and the spec leaves such a code undefined.
+    """
     texts = {"%c": name.replace("%", "%%"), "%k": path.replace("%", "%%"), "%": "%%"}
 
     def expand(match: re.Match) -> str:
         return match[0] if match[0] in KEPT_CODES else texts.get(match[0], "")
 
     argv: list[str] = []
-    for word in split_words(unescape(value)):
+    for word, marked in split_marked(unescape(value)):
+        if marked and takes_url((word,)):
+            raise ValueError(f"a link code inside quotes: {word}")
         if word == "%i":
             argv += ["--icon", icon.replace("%", "%%")] if icon else []
             continue

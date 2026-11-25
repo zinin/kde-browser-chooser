@@ -54,6 +54,8 @@ icon = "google-chrome"                                # icon theme name or path;
 command = "google-chrome-stable --profile-directory='Profile 1'"  # links replace %u or %U, or go last
 ```
 
+A link code (`%u`, `%U`) must not stand inside quotes; to wrap a browser in a shell, pass the link as an argument of its own, for example `sh -c 'exec firefox "$1"' sh %u`.
+
 `kde-browser-chooser --list` prints the ids. A mistake in the file blocks no link: the window opens as if the file were not there, and a notification names the mistake.
 
 ## Which browsers it finds

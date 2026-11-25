@@ -5,11 +5,14 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .desktop import takes_url
+from .desktop import split_marked, takes_url
 from .i18n import AVAILABLE
 from .model import Tile
 
 RESERVED_IDS = {"copy", "cancel"}
+SHLEX_BLANKS = " \t\r\n"  # where shlex.split parts words
+LINK_IN_QUOTES = ("a link code inside quotes is not allowed; pass the link as an argument of its own, "
+                  "as in sh -c 'exec firefox \"$1\"' sh %u")
 
 
 class ConfigError(Exception):
@@ -72,6 +75,11 @@ def custom_tile(table: dict) -> Tile:
         argv = shlex.split(command)
     except ValueError as error:
         raise ConfigError(f'"command" of "{name}": {error}') from error
+    # The words that were quoted or escaped, by the POSIX rules that shlex.split follows as well: a link there
+    # would become part of the text the quotes protect, such as a shell script.
+    quoted = [word for word, marked in split_marked(command, lambda char: char in SHLEX_BLANKS) if marked]
+    if takes_url(tuple(quoted)):
+        raise ConfigError(f'"command" of "{name}": {LINK_IN_QUOTES}')
     return Tile(tile_id, name, text(table, "icon"), tuple(argv if takes_url(tuple(argv)) else [*argv, "%U"]))
 
 

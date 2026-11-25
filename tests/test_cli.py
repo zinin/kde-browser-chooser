@@ -209,6 +209,16 @@ def test_config_error_still_shows_the_window(run, configure, fakes):
     assert summary == "The settings file has an error and is not used" and "hide" in body
 
 
+def test_link_code_inside_quotes_is_a_config_error(run, configure, fakes):
+    fakes.add("notify-send")
+    configure("[[tile]]\nname = 'Mine'\ncommand = \"sh -c 'firefox %u'\"\n")
+    run([URL], "chrome")
+    assert [tile.id for tile in run.shown[0][0]] == ["copy", "firefox", "chrome"]
+    assert run.done == [("chrome", [URL])]
+    summary, body = fakes.args("notify-send")[-2:]
+    assert summary == "The settings file has an error and is not used" and "a link code inside quotes" in body
+
+
 @pytest.mark.parametrize("argv, urls", [
     (["--", "u"], ["u"]), (["u"], ["u"]), (["--", "--list"], ["--list"]), (["--list", "u"], ["--list", "u"]),
     (["--x"], ["--x"]), (["u", "--version"], ["u", "--version"]), (["--"], [])])
