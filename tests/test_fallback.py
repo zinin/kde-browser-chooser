@@ -8,8 +8,8 @@ OPERA = Tile("opera", "Opera", "", ("opera", "%U"))
 STRINGS = {"title": "Open link"}
 
 
-def pick(label="https://e.com/", last="chrome"):
-    return pick_with_kdialog([CHROME, OPERA], label, last, STRINGS)
+def pick(label="https://e.com/", last="chrome", counter="", tiles=(CHROME, OPERA)):
+    return pick_with_kdialog(list(tiles), label, counter, last, STRINGS)
 
 
 def test_menu(fakes):
@@ -17,7 +17,7 @@ def test_menu(fakes):
     assert pick("https://e.com/?a=1&b=<2>") == OPERA
     args = fakes.args("kdialog")
     assert args[:2] == ["--title", "Open link"]
-    assert "https://e.com/?a=1&amp;b=&lt;2&gt;" in args
+    assert "<qt>https://e.com/?a=1&amp;b=&lt;2&gt;</qt>" in args  # as rich text, so that < > & show as such
     assert args[-4:] == ["chrome", "Google Chrome", "opera", "Opera"]
 
 
@@ -48,4 +48,31 @@ def test_no_kdialog(fakes):
 def test_long_link(fakes):
     fakes.add("kdialog", out="opera\n")
     pick("x" * 200)
-    assert "x" * 107 + "..." in fakes.args("kdialog")
+    assert "<qt>" + "x" * 107 + "...</qt>" in fakes.args("kdialog")
+
+
+def test_long_link_keeps_the_counter(fakes):
+    fakes.add("kdialog", out="opera\n")
+    pick("x" * 200, counter="(+1)")
+    assert "<qt>" + "x" * 102 + "... (+1)</qt>" in fakes.args("kdialog")
+
+
+def test_items_that_look_like_options(fakes):
+    tiles = [Tile("-p", "- private", "", ("x", "%U")), Tile("--help", "-v", "", ("x", "%U"))]
+    fakes.add("kdialog", out="-p\n")
+    assert pick(tiles=tiles, last="--help") == tiles[0]
+    args = fakes.args("kdialog")
+    assert args[args.index("--") + 1:] == ["-p", "- private", "--help", "-v"]
+
+
+def test_id_with_a_trailing_space(fakes):
+    work = Tile("work ", "Work", "", ("x", "%U"))
+    fakes.add("kdialog", out="work \n")
+    assert pick(tiles=[CHROME, work]) == work
+
+
+@pytest.mark.parametrize("out", ["", "nonexistent\n", "Usage: kdialog [options]\n"])
+def test_unknown_answer_is_not_a_cancel(fakes, out):
+    fakes.add("kdialog", out=out)
+    with pytest.raises(RuntimeError):
+        pick()

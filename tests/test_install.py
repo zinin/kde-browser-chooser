@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import fake_desktop
+import kde_browser_chooser
 from kde_browser_chooser import desktop as desktop_entry
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -14,7 +15,7 @@ SCRIPT = ROOT / "install.sh"
 APP = "kde-browser-chooser"
 OURS = f"{APP}.desktop"
 MIMES = ["x-scheme-handler/http", "x-scheme-handler/https", "text/html", "application/xhtml+xml"]
-CORE = ("sh awk cat chmod cp curl cut grep head mkdir mktemp mv rm rmdir sed sha256sum tr uname").split()
+CORE = ("sh awk cat chmod cmp cp curl cut grep head mkdir mktemp mv readlink rm rmdir sed sha256sum tr uname").split()
 ALL_OURS = dict.fromkeys([*MIMES, "kdeglobals"], OURS)
 ALL_CHROME = dict.fromkeys([*MIMES, "kdeglobals"], "chrome.desktop")
 
@@ -148,7 +149,7 @@ def test_installs_and_becomes_the_default(home, dist):
     assert home.program.stat().st_mode & 0o777 == 0o755
     assert f"Exec={home.program} -- %U" in home.entry.read_text().splitlines()
     assert home.defaults() == ALL_OURS
-    assert f"{APP} 0.1.0" in home.output and "is the default browser now" in home.output
+    assert f"{APP} {kde_browser_chooser.__version__}" in home.output and "is the default browser now" in home.output
 
 
 @pytest.mark.parametrize("kind", ["system", "other", None])
@@ -283,6 +284,22 @@ def test_linked_settings_stay_linked(home, tmp_path):
     assert home.desktop.mimeapps.is_symlink() and home.defaults() == ALL_CHROME
 
 
+def test_unchanged_settings_are_not_rewritten(home):
+    os.utime(home.desktop.mimeapps, ns=(0, 0))
+    before = home.desktop.mimeapps.stat()
+    assert home.run("--uninstall") == 0, home.output
+    after = home.desktop.mimeapps.stat()
+    assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
+
+
+def test_settings_keep_their_permissions(home):
+    home.run("--yes")
+    home.desktop.mimeapps.chmod(0o640)
+    assert home.run("--uninstall") == 0, home.output
+    assert home.desktop.mimeapps.stat().st_mode & 0o777 == 0o640 and home.defaults() == ALL_CHROME
+    assert [path.name for path in home.desktop.mimeapps.parent.iterdir() if path.name.startswith(".")] == []
+
+
 def test_uninstall_when_the_previous_browser_is_gone(home):
     home.run("--yes")
     (home.desktop.apps / "chrome.desktop").unlink()
@@ -305,7 +322,7 @@ def test_uninstall_and_settings(home, options, kept):
     assert config.exists() is kept
 
 
-@pytest.mark.parametrize("name", ["a b", "user@corp.example", "иван", "50%", "a$b"])
+@pytest.mark.parametrize("name", ["a b", "user@corp.example", "иван", "50%", "a$b", "a\\b", 'a\\"b', "a\\"])
 def test_unusual_home(home, tmp_path, name):
     unusual = tmp_path / name
     home.home.rename(unusual)
@@ -337,6 +354,15 @@ def test_default_that_did_not_take(home):
     home.fake("xdg-settings", "exit 4")
     assert home.run("--yes") == 0
     assert "System Settings" in home.output and home.defaults() == ALL_CHROME
+
+
+def test_default_that_took_only_for_links(home):
+    """xdg-settings stops at the first type it cannot set."""
+    home.set("html-fails")
+    assert home.run("--yes") == 0, home.output
+    assert home.defaults() == ALL_CHROME | dict.fromkeys([*MIMES[:2], "application/xhtml+xml"], OURS)
+    assert "is the default browser now" not in home.output and "no effect" not in home.output
+    assert "text/html kdeglobals" in home.output and "System Settings" in home.output
 
 
 @pytest.mark.parametrize("manager, command", [

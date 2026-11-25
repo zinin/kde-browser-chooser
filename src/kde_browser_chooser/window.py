@@ -16,7 +16,7 @@ def columns(count: int) -> int:
     return 2 if count <= 4 else 3 if count <= 9 else 4
 
 
-def pick(tiles: list[Tile], label: str, last: str, strings: Mapping[str, str]) -> Tile | None:
+def pick(tiles: list[Tile], label: str, counter: str, last: str, strings: Mapping[str, str]) -> Tile | None:
     """Shows the window and returns the tile clicked, or None for "Cancel"."""
     from PyQt6.QtCore import QElapsedTimer, QSize, Qt
     from PyQt6.QtGui import QColor, QIcon, QPalette
@@ -29,6 +29,7 @@ def pick(tiles: list[Tile], label: str, last: str, strings: Mapping[str, str]) -
     app.setWindowIcon(QIcon.fromTheme(ICON))
 
     picked: Tile | None = None
+    armed = False
     shown = QElapsedTimer()
 
     class Window(QDialog):
@@ -44,10 +45,15 @@ def pick(tiles: list[Tile], label: str, last: str, strings: Mapping[str, str]) -
             else:
                 super().keyPressEvent(event)
 
+    def on_press() -> None:
+        nonlocal armed
+        # The second click of a double click on the link must not choose a tile, and it may be released only
+        # after the guard: what counts is when it was pressed.
+        armed = shown.isValid() and shown.hasExpired(GUARD_MS)
+
     def on_click(tile: Tile | None) -> None:
         nonlocal picked
-        # The second click of a double click on the link must not choose a tile.
-        if picked or not shown.isValid() or not shown.hasExpired(GUARD_MS):
+        if picked or not armed:
             return
         picked = tile
         if tile and tile.command:
@@ -81,6 +87,7 @@ def pick(tiles: list[Tile], label: str, last: str, strings: Mapping[str, str]) -
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         button.setFixedSize(TILE_WIDTH, TILE_HEIGHT)
         button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        button.pressed.connect(on_press)  # click(), which Enter calls, emits pressed too
         button.clicked.connect(lambda _, tile=tile: on_click(tile))
         group.addButton(button)
         grid.addWidget(button, 1 + position // per_row, position % per_row)
@@ -91,7 +98,10 @@ def pick(tiles: list[Tile], label: str, last: str, strings: Mapping[str, str]) -
     text = QLabel()
     text.setTextFormat(Qt.TextFormat.PlainText)
     width = per_row * TILE_WIDTH + (per_row - 1) * grid.horizontalSpacing()
-    text.setText(text.fontMetrics().elidedText(label, Qt.TextElideMode.ElideRight, width))
+    after = f" {counter}" if counter else ""  # the counter of links stays whole: only the link is elided
+    metrics = text.fontMetrics()
+    room = width - metrics.horizontalAdvance(after)
+    text.setText(metrics.elidedText(label, Qt.TextElideMode.ElideRight, room) + after)
     grid.addWidget(text, 0, 0, 1, per_row)
 
     return picked if window.exec() else None

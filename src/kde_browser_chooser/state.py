@@ -8,7 +8,7 @@ from .model import Tile
 def read_last(path: Path, tiles: list[Tile]) -> str:
     last = ""
     with contextlib.suppress(OSError, UnicodeDecodeError):
-        last = path.read_text(encoding="utf-8").strip()
+        last = path.read_text(encoding="utf-8").removesuffix("\n")  # what save_last wrote: an id may end in a space
     ids = [tile.id for tile in tiles]
     return last if last in ids else next(iter(ids), "")
 

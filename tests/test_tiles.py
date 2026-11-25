@@ -54,6 +54,12 @@ def test_last_roundtrip(tmp_path):
     assert read_last(path, [CHROME, FIREFOX]) == "firefox"
 
 
+def test_last_with_a_trailing_space(tmp_path):
+    work = Tile("work ", "Work", "", ("work", "%U"))
+    save_last(tmp_path / "last", work.id)
+    assert read_last(tmp_path / "last", [CHROME, work]) == "work "
+
+
 @pytest.mark.parametrize("content", [None, b"", b"netscape\n", b"\xff\xfe"])
 def test_unknown_last_is_the_first_tile(tmp_path, content):
     path = tmp_path / "last"

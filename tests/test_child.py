@@ -36,7 +36,7 @@ def test_crash_is_an_exception(function):
         child.run(function)
 
 
-def test_child_does_not_outlive_the_parent(tmp_path):
+def test_child_does_not_outlive_the_parent(tmp_path, gone):
     pid_file = tmp_path / "pid"
     code = (f"import os, sys, time; sys.path.insert(0, {str(SRC)!r})\nfrom kde_browser_chooser import child\n"
             f"def f():\n    open({str(pid_file)!r} + '.part', 'w').write(str(os.getpid()))\n"
@@ -48,6 +48,6 @@ def test_child_does_not_outlive_the_parent(tmp_path):
         time.sleep(0.02)
     parent.kill()
     parent.wait()
-    while Path("/proc", pid_file.read_text()).exists():
+    while not gone(pid_file.read_text()):
         assert time.monotonic() < deadline, "the child is still there"
         time.sleep(0.02)

@@ -1,10 +1,23 @@
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 sys.dont_write_bytecode = True
+
+# kdialog's QCommandLineParser takes an argument that starts with "-" before "--" for an option, and an
+# unknown option ends kdialog with 1, which is also "Cancel".
+KDIALOG_OPTIONS = """\
+while [ $# -gt 0 ] && [ "$1" != -- ]; do
+    case $1 in
+    --title | --icon | --default | --menu) shift ;;
+    -?*) exit 1 ;;
+    esac
+    shift
+done
+"""
 
 
 class Apps:
@@ -53,6 +66,7 @@ class Fakes:
             "#!/bin/bash\n"
             f"{{ for a in \"$@\"; do printf '%s\\0' \"$a\"; done; printf '\\001'; }} >> '{self.root}/{name}.calls'\n"
             + (f"/usr/bin/cat > '{self.root}/{name}.stdin'\n" if name == "wl-copy" else "")
+            + (KDIALOG_OPTIONS if name == "kdialog" else "")
             + f"printf '%s' '{out}'\nexit {code}\n")
         script.chmod(0o755)
 
@@ -75,3 +89,18 @@ def fakes(tmp_path, monkeypatch):
     fakes = Fakes(tmp_path)
     monkeypatch.setenv("PATH", str(fakes.bin))
     return fakes
+
+
+@pytest.fixture
+def gone():
+    """Tells whether a process has ended. One that ended stays a zombie until its parent reaps it, and the
+    parent it gets when its own dies may never do that: in a CI container PID 1 is "tail -f /dev/null"."""
+
+    def gone(pid):
+        try:
+            stat = Path("/proc", str(pid), "stat").read_text()
+        except (FileNotFoundError, ProcessLookupError):
+            return True
+        return stat[stat.rindex(")") + 1:].split()[0] in ("Z", "X")
+
+    return gone

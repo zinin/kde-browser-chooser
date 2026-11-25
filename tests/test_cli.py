@@ -13,6 +13,7 @@ from kde_browser_chooser import cli
 
 SRC = Path(__file__).resolve().parent.parent / "src"
 URL = "https://e.com/?a=1&b=<2>"
+SHOWN = "https://e.com/?a=1&amp;b=&lt;2&gt;"  # URL in a notification, which Plasma reads as markup
 CHROME = dict(Type="Application", Name="Google Chrome", Exec="chrome %U", Icon="chrome",
               MimeType="x-scheme-handler/https;")
 
@@ -53,9 +54,9 @@ def run(session, monkeypatch):
     def run(argv, picked, token=None):
         run.shown, run.done = [], []
 
-        def show(function, tiles, label, last, strings):
+        def show(function, tiles, label, counter, last, strings):
             assert function is cli.show_window
-            run.shown.append((tiles, label, last, strings))
+            run.shown.append((tiles, label, counter, last, strings))
             if isinstance(picked, Exception):
                 raise picked
             return [picked, token]
@@ -72,9 +73,9 @@ def test_opens_and_remembers(run, last):
     last.parent.mkdir(parents=True)
     last.write_text("firefox\n")
     assert run(["--", URL, "u2"], "chrome") == 0
-    (tiles, label, shown_last, strings), = run.shown
+    (tiles, label, counter, shown_last, strings), = run.shown
     assert [tile.id for tile in tiles] == ["copy", "firefox", "chrome"]
-    assert (label, shown_last, strings["title"]) == (f"{URL} (+1)", "firefox", "Open link")
+    assert (label, counter, shown_last, strings["title"]) == (URL, "(+1)", "firefox", "Open link")
     assert run.done == [("chrome", [URL, "u2"])]
     assert last.read_text() == "chrome\n"
 
@@ -99,7 +100,16 @@ def test_without_link(run):
 
 def test_one_link_has_no_counter(run):
     run([URL], None)
-    assert run.shown[0][1] == URL
+    assert run.shown[0][1:3] == (URL, "")
+
+
+def test_long_first_link_keeps_the_counter(run, fakes):
+    long = "https://e.com/" + "x" * 300
+    fakes.add("kdialog", code=1)
+    run([long, "u2"], ImportError("no PyQt6"))
+    assert run.shown[0][1:3] == (long, "(+1)")
+    args = fakes.args("kdialog")
+    assert args[args.index("--menu") + 1] == "<qt>" + long[:102] + "... (+1)</qt>"
 
 
 def test_browser_gets_the_token_of_the_window(run, monkeypatch):
@@ -117,7 +127,7 @@ def test_window_returns_id_and_token(monkeypatch, picked):
     monkeypatch.setenv("XDG_ACTIVATION_TOKEN", "old")
     monkeypatch.setattr(cli.window, "pick", pick)
     tile = cli.Tile("chrome", "Chrome", "", ("chrome", "%U"))
-    assert cli.show_window([tile], "", "", {}) == [picked, "fresh"]
+    assert cli.show_window([tile], "", "", "", {}) == [picked, "fresh"]
 
 
 def test_crashed_window_falls_back(session, monkeypatch, fakes):
@@ -149,7 +159,7 @@ def test_anything_unexpected_is_told_with_the_link(run, fakes, monkeypatch):
 
     monkeypatch.setattr(cli.desktop, "find_browsers", broken)
     assert run([URL], None) == 1
-    assert fakes.args("notify-send")[-2:] == ["Could not show the browser chooser", URL]
+    assert fakes.args("notify-send")[-2:] == ["Could not show the browser chooser", SHOWN]
 
 
 def test_falls_back_to_kdialog(run, fakes, last):
@@ -170,14 +180,21 @@ def test_nothing_works_so_notify(run, fakes, code):
         fakes.add("kdialog", code=code)
     fakes.add("notify-send")
     assert run([URL], ImportError("no PyQt6")) == 1
-    assert fakes.args("notify-send")[-2:] == ["Could not show the browser chooser", URL]
+    assert fakes.args("notify-send")[-2:] == ["Could not show the browser chooser", SHOWN]
+
+
+def test_unknown_answer_of_kdialog_is_told_with_the_link(run, fakes):
+    fakes.add("kdialog", out="Usage: kdialog [options]\n")
+    fakes.add("notify-send")
+    assert run([URL], ImportError("no PyQt6")) == 1
+    assert fakes.args("notify-send")[-2:] == ["Could not show the browser chooser", SHOWN]
 
 
 def test_config_applies(run, configure):
     configure('language = "ru"\norder = ["chrome"]\nhide = ["copy"]\nrename = { chrome = "Хром" }\n'
               '[[tile]]\nname = "Mine"\ncommand = "mine"\n')
     run([URL], None)
-    (tiles, _, _, strings), = run.shown
+    (tiles, _, _, _, strings), = run.shown
     assert [(tile.id, tile.title) for tile in tiles] == [("chrome", "Хром"), ("firefox", "Лиса"), ("mine", "Mine")]
     assert strings["title"] == "Открыть ссылку"
 
@@ -225,6 +242,11 @@ def test_help(run, capsys):
     assert "--list" in (out := capsys.readouterr().out) and "config.toml" in out
 
 
+def test_help_names_the_settings_file(run, session, capsys):
+    assert run(["--help"], None) == 0
+    assert f"Settings: {session}/config/kde-browser-chooser/config.toml (optional)" in capsys.readouterr().out
+
+
 CHILD = f"import sys; sys.path.insert(0, {str(SRC)!r}); from kde_browser_chooser.cli import run; run()"
 
 
@@ -238,7 +260,21 @@ def test_dead_stderr_still_shows_kdialog(session, fakes):
     assert len(fakes.calls("kdialog")) == 1
 
 
-def test_ctrl_c_ends_the_program(session):
+def test_ignored_sigchld_does_not_lose_the_link(session, fakes):
+    """The program that opened the link may ignore SIGCHLD, and exec keeps that: then no exit status of a child
+    would be seen, and a notify-send that failed would count as shown."""
+    fakes.add("kdialog", code=2)
+    fakes.add("notify-send", code=1)
+    fakes.add("busctl")
+    # -S hides dist-packages, where PyQt6 lives: the window cannot open.
+    result = subprocess.run([sys.executable, "-B", "-S", "-c", CHILD, URL], capture_output=True, text=True,
+                            timeout=20, preexec_fn=lambda: signal.signal(signal.SIGCHLD, signal.SIG_IGN))
+    assert result.returncode == 1, result.stderr
+    assert len(fakes.calls("kdialog")) == 1
+    assert [call[-4] for call in fakes.calls("busctl")] == [SHOWN]  # the body of the notification
+
+
+def test_ctrl_c_ends_the_program(session, gone):
     pytest.importorskip("PyQt6.QtWidgets")
     ready = session / "ready"
     child = f"""
@@ -265,7 +301,7 @@ cli.run()
     process.send_signal(signal.SIGINT)
     assert process.wait(1) == -signal.SIGINT
     assert "Traceback" not in process.communicate()[1]
-    while Path("/proc", ready.read_text()).exists():
+    while not gone(ready.read_text()):
         assert time.monotonic() < deadline, "the window is still there"
         time.sleep(0.02)
 

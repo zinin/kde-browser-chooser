@@ -27,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/zinin/kde-browser-chooser/master/in
 curl -fsSL https://raw.githubusercontent.com/zinin/kde-browser-chooser/master/install.sh | sh -s -- --uninstall
 ```
 
-`--uninstall --purge` удаляет и настройки, `--yes` соглашается со всем предложенным, `--no-default` не трогает браузер по умолчанию, `--version 0.1.0` выбирает другой релиз. Другой каталог задаёт `KBC_INSTALL_DIR`: `curl … | KBC_INSTALL_DIR=/opt/bin sh`.
+`--uninstall --purge` удаляет и настройки, `--yes` соглашается со всем предложенным, `--no-default` не трогает браузер по умолчанию, `--version 0.1.0` выбирает другой релиз. Другой каталог задаёт `KBC_INSTALL_DIR`: `curl … | KBC_INSTALL_DIR=$HOME/bin sh`.
 
 ## Что нужно
 

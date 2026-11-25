@@ -27,7 +27,7 @@ To remove the program and get your previous default browser back:
 curl -fsSL https://raw.githubusercontent.com/zinin/kde-browser-chooser/master/install.sh | sh -s -- --uninstall
 ```
 
-`--uninstall --purge` removes the settings too, `--yes` accepts every suggestion, `--no-default` leaves the default browser alone, and `--version 0.1.0` picks another release. `KBC_INSTALL_DIR` names another directory: `curl … | KBC_INSTALL_DIR=/opt/bin sh`.
+`--uninstall --purge` removes the settings too, `--yes` accepts every suggestion, `--no-default` leaves the default browser alone, and `--version 0.1.0` picks another release. `KBC_INSTALL_DIR` names another directory: `curl … | KBC_INSTALL_DIR=$HOME/bin sh`.
 
 ## Requirements
 

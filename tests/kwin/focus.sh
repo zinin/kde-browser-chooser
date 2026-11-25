@@ -25,6 +25,7 @@ run() { # run NAME WANT SCENARIO PROGRAM...
 	shift 3
 	printf '#!/bin/sh\nexec %s "$@"\n' "$*" >"$work/bin/xdg-open"
 	chmod +x "$work/bin"/*
+	rm -f "$work/result"
 	"$here/nested.sh" "$work" 1 "$here/scenario.sh" "$work" "$scenario" || true
 	local got
 	got=$(cat "$work/result" 2>/dev/null || echo "no answer")

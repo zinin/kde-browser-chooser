@@ -36,9 +36,12 @@ def request_token(window, done: Callable[[], object]) -> None:
     from PyQt6.QtCore import QTimer
 
     def arrived(_serial: int, token: str) -> None:
-        if token:
-            os.environ["XDG_ACTIVATION_TOKEN"] = token
-        done()
+        try:
+            if token:
+                os.environ["XDG_ACTIVATION_TOKEN"] = token
+            done()
+        except Exception:  # out of a Qt slot it would abort the process, and the link would be lost
+            log_exception()
 
     try:
         extras = kwayland_extras()

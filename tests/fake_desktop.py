@@ -2,7 +2,7 @@
 """xdg-settings, xdg-mime and kwriteconfig6 as they behave on KDE Plasma 6 (xdg-utils 1.2.1).
 
 They work on the files of $HOME. $REGISTRY/system is the browser the distribution chose explicitly,
-$REGISTRY/other a browser that is merely installed.
+$REGISTRY/other a browser that is merely installed. With $REGISTRY/html-fails xdg-settings fails on text/html.
 """
 import os
 import shutil
@@ -76,6 +76,8 @@ class Desktop:
 
     def set_browser(self, entry):
         for mime in ("x-scheme-handler/http", "x-scheme-handler/https", "text/html"):
+            if mime == "text/html" and self.registry.joinpath("html-fails").exists():
+                return 4
             before = self.effective(mime)
             self.set_default(entry, mime)
             if self.effective(mime) != entry:

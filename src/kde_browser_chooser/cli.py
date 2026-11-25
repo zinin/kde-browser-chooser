@@ -9,7 +9,7 @@ from .log import log_exception
 from .model import Tile
 from .notify import notify
 
-HELP = f"""\
+HELP = """\
 Usage: kde-browser-chooser [--] [URL...]
        kde-browser-chooser --list | --version | --help
 
@@ -19,7 +19,7 @@ Asks in which browser to open the links. Meant to be the default browser.
   --version  print the version
   --help     print this help
 
-Settings: {paths.config_file({"HOME": "~"})} (optional)"""
+Settings: {config} (optional)"""
 
 
 def load(urls: list[str], settings: config.Config) -> tuple[list[Tile], dict[str, str]]:
@@ -28,9 +28,9 @@ def load(urls: list[str], settings: config.Config) -> tuple[list[Tile], dict[str
     return tiles.build(desktop.find_browsers(os.environ, language), settings, strings, bool(urls)), strings
 
 
-def show_window(choices: list[Tile], label: str, last: str, strings: dict[str, str]) -> list[str | None]:
+def show_window(choices: list[Tile], label: str, counter: str, last: str, strings: dict[str, str]) -> list[str | None]:
     """Runs in a child process: returns the id of the chosen tile and the activation token for it."""
-    picked = window.pick(choices, label, last, strings)
+    picked = window.pick(choices, label, counter, last, strings)
     return [picked.id if picked else None, os.environ.get("XDG_ACTIVATION_TOKEN")]
 
 
@@ -45,18 +45,19 @@ def choose(urls: list[str]) -> int:
         notify("dialog-warning", strings["config_error"], f"{paths.config_file(os.environ)}: {error}")
 
     label = urls[0] if urls else strings["no_link"]
+    counter = ""  # apart from the link, so that cutting a long link leaves it
     if len(urls) > 1:
-        label += " " + strings["more_links"].format(n=len(urls) - 1)
+        counter = strings["more_links"].format(n=len(urls) - 1)
     last_file = paths.last_file(os.environ)
     last = state.read_last(last_file, choices)
     try:
-        picked_id, token = child.run(show_window, choices, label, last, strings)
+        picked_id, token = child.run(show_window, choices, label, counter, last, strings)
         picked = next((tile for tile in choices if tile.id == picked_id), None)
         if token:
             os.environ["XDG_ACTIVATION_TOKEN"] = token
     except Exception:
         log_exception()
-        picked = fallback.pick_with_kdialog(choices, label, last, strings)
+        picked = fallback.pick_with_kdialog(choices, label, counter, last, strings)
     if picked is None:
         return 0
     state.save_last(last_file, picked.id)
@@ -82,7 +83,7 @@ def main(argv: list[str]) -> int:
             print(f"kde-browser-chooser {__version__}")
             return 0
         case ["--help"]:
-            print(HELP)
+            print(HELP.format(config=paths.config_file(os.environ)))
             return 0
     urls = argv[1:] if argv[:1] == ["--"] else argv
     try:
@@ -95,6 +96,8 @@ def main(argv: list[str]) -> int:
 
 
 def run() -> None:
+    # An ignored SIGCHLD survives exec, and then no exit status of a child is seen: the window's answer is lost.
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
     if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
         signal.signal(signal.SIGINT, signal.SIG_DFL)  # Python would see Ctrl+C only after the window is closed
     sys.exit(main(sys.argv[1:]))

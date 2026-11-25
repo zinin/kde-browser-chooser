@@ -42,7 +42,7 @@ class FirstPaint(QObject):
         return False
 
 
-def drive(action, tiles=TILES, label="https://e.com/", last="copy", wait=None, strings=STRINGS):
+def drive(action, tiles=TILES, label="https://e.com/", last="copy", wait=None, strings=STRINGS, counter=""):
     """Shows the window, calls action(dialog) wait ms after its first paint, returns the choice."""
     failures = []
 
@@ -67,7 +67,7 @@ def drive(action, tiles=TILES, label="https://e.com/", last="copy", wait=None, s
     paint = FirstPaint(list(timers))
     app.installEventFilter(paint)
     try:
-        result = window.pick(tiles, label, last, strings)
+        result = window.pick(tiles, label, counter, last, strings)
     finally:
         app.removeEventFilter(paint)
         for timer, _ in timers:
@@ -169,6 +169,19 @@ def test_guard_is_300_ms(wait, want):
     assert drive(lambda d: click(d, "Google Chrome"), wait=wait) == want
 
 
+@pytest.mark.parametrize("wait, want", [(200, None), (345, CHROME)])
+def test_guard_counts_the_press(wait, want):
+    """The second click of a double click on the link can be pressed within the guard and released after it."""
+
+    def press_then_release(dialog):
+        target = button(dialog, "Google Chrome")
+        QTest.mousePress(target, LEFT, pos=QPoint(4, 4))
+        QTest.qWait(200)
+        QTest.mouseRelease(target, LEFT, pos=QPoint(4, 4))
+
+    assert drive(press_then_release, wait=wait) == want
+
+
 def test_early_escape_works():
     seen = []
 
@@ -180,14 +193,14 @@ def test_early_escape_works():
     assert seen == [False]
 
 
-def look_at(label):
+def look_at(label, counter=""):
     seen = {}
 
     def look(dialog):
         text = dialog.findChild(QLabel)
         seen.update(size=QSize(dialog.size()), text=text.text(), format=text.textFormat())
 
-    drive(look, label=label)
+    drive(look, label=label, counter=counter)
     return seen
 
 
@@ -195,6 +208,13 @@ def test_long_link():
     short, long = look_at("https://e.com/"), look_at("https://e.com/" + "x" * 5000)
     assert long["size"] == short["size"]
     assert long["text"].startswith("https://e.com/xxx") and long["text"].endswith("…")
+
+
+def test_long_link_keeps_the_counter():
+    short, long = look_at("https://e.com/", "(+1)"), look_at("https://e.com/" + "x" * 5000, "(+1)")
+    assert short["text"] == "https://e.com/ (+1)"
+    assert long["size"] == short["size"]
+    assert long["text"].startswith("https://e.com/xxx") and long["text"].endswith("… (+1)")
 
 
 def test_link_is_literal():
@@ -317,6 +337,16 @@ def test_broken_kde_library_does_not_lose_the_click(extras, monkeypatch):
     extras(None)
     monkeypatch.setattr(activation, "kwayland_extras", broken)
     assert drive(lambda d: click(d, "Firefox")) == FIREFOX
+
+
+def test_token_that_cannot_be_used_does_not_lose_the_click(extras, monkeypatch):
+    """The environment takes no null byte. An exception out of a slot would abort the program; here the hook
+    catches it instead."""
+    escaped = []
+    monkeypatch.setattr(sys, "excepthook", lambda kind, error, trace: escaped.append(error))
+    extras("fresh\0token")
+    assert drive(lambda d: click(d, "Firefox")) == FIREFOX
+    assert escaped == [] and os.environ["XDG_ACTIVATION_TOKEN"] == "old"
 
 
 class DeadStream:

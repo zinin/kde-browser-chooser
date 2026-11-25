@@ -13,6 +13,7 @@ from kde_browser_chooser.notify import notify
 
 SRC = Path(__file__).resolve().parent.parent / "src"
 URL = "https://e.com/?a=1&b=<2>"
+SHOWN = "https://e.com/?a=1&amp;b=&lt;2&gt;"  # URL in a notification, which Plasma reads as markup
 STRINGS = {"copied": "Copied", "copy_failed": "Copy failed", "launch_failed": "No {name}"}
 
 
@@ -93,7 +94,7 @@ def test_copy_uses_wl_copy_first(fakes, monkeypatch):
     assert actions.copy([URL, "b"], STRINGS) == 0
     assert fakes.stdin("wl-copy") == f"{URL}\nb".encode()
     assert fakes.calls("busctl") == []
-    assert fakes.args("notify-send")[-2:] == ["Copied", f"{URL}\nb"]
+    assert fakes.args("notify-send")[-2:] == ["Copied", f"{SHOWN}\nb"]
 
 
 @pytest.mark.parametrize("wl_copy", [None, 1])
@@ -160,6 +161,21 @@ def test_notify_shows_what_it_can(fakes):
     fakes.add("notify-send")
     notify("edit-copy", "Summary", "nu\0ll")
     assert fakes.args("notify-send")[-2:] == ["Summary", "null"]
+
+
+@pytest.mark.parametrize("tool, body", [("notify-send", -1), ("busctl", -4)])
+def test_notification_body_is_not_markup(fakes, tool, body):
+    """Plasma reads the body as markup: "&#" would empty it, and "<foo>" would vanish."""
+    if tool == "busctl":
+        fakes.add("notify-send", code=1)
+    fakes.add(tool)
+    notify("edit-copy", "Summary", "https://e.com/?a=1&#comments <foo>")
+    assert fakes.args(tool)[body] == "https://e.com/?a=1&amp;#comments &lt;foo&gt;"
+
+
+def test_stderr_gets_the_body_as_it_is(fakes, capsys):
+    notify("edit-copy", "Summary", "https://e.com/?a=1&#comments <foo>")
+    assert "Summary: https://e.com/?a=1&#comments <foo>" in capsys.readouterr().err
 
 
 def test_gdbus_without_busctl(fakes):

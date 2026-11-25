@@ -23,9 +23,10 @@ class Crashed(Exception):
 def run(function: Callable, *args) -> Any:
     """Returns what function(*args) returned, as JSON carries it."""
     read_end, write_end = os.pipe()
+    parent = os.getpid()
     pid = os.fork()
     if pid == 0:
-        _answer(write_end, function, args)
+        _answer(parent, read_end, write_end, function, args)
     os.close(write_end)
     with open(read_end, "rb") as pipe:
         answer = pipe.read()
@@ -35,10 +36,13 @@ def run(function: Callable, *args) -> Any:
     return json.loads(answer)
 
 
-def _answer(write_end: int, function: Callable, args: tuple) -> NoReturn:
+def _answer(parent: int, read_end: int, write_end: int, function: Callable, args: tuple) -> NoReturn:
     status = 1
     try:
+        os.close(read_end)
         ctypes.CDLL(None).prctl(PR_SET_PDEATHSIG, signal.SIGTERM)  # it must not outlive the parent
+        if os.getppid() != parent:  # the parent died before prctl, and no signal will come
+            os._exit(1)
         with open(write_end, "wb") as pipe:
             pipe.write(json.dumps(function(*args)).encode())
         status = 0

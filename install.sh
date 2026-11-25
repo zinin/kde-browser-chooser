@@ -148,12 +148,13 @@ download() {
 
 # exec_value prints the path $1 as Exec wants it, quoted if the Desktop Entry Specification reserves
 # one of its characters. xdg-utils do not understand a quoted program, but they do understand env.
+# \ " ` $ are escaped twice, in the quoted argument and in the string: one \ in the path becomes four.
 exec_value() {
 	reserved=$(printf '%s' "$1" | LC_ALL=C tr -d 'A-Za-z0-9/._+@:,=\200-\377-')
 	if [ -z "$reserved" ]; then
 		printf '%s' "$1"
 	else
-		printf '/usr/bin/env "%s"' "$(printf '%s' "$1" | sed -e 's/["`$]/\\\\&/g' -e 's/%/%%/g')"
+		printf '/usr/bin/env "%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\\\\\/g' -e 's/["`$]/\\\\&/g' -e 's/%/%%/g')"
 	fi
 }
 
@@ -252,9 +253,19 @@ make_default() {
 	xdg-settings set default-web-browser "$ours" >/dev/null 2>&1 || true
 	if is_chosen; then
 		xdg-mime default "$ours" application/xhtml+xml >/dev/null 2>&1 || true
-		say "it is the default browser now; programs already running may need a restart."
 	else
 		say "that had no effect; make it the default browser in $by_hand."
+		return 0
+	fi
+	# xdg-settings stops at the first type it cannot set, so every key is checked.
+	others=
+	for key in $keys; do
+		is_ours "$(chosen "$key")" || others="$others $key"
+	done
+	if [ -z "$others" ]; then
+		say "it is the default browser now; programs already running may need a restart."
+	else
+		say "links open through it now, but$others still belong to other programs; make it the default browser in $by_hand."
 	fi
 }
 
@@ -274,7 +285,9 @@ exists() (
 )
 
 # forget takes our entry out of mimeapps.list; the file $1 has a line "type=previous choice" for each
-# type that is still ours. The list is written in place, for it may be a symbolic link.
+# type that is still ours. An unchanged list is left alone. A changed one is written beside the file that
+# the name leads to, with its permissions, and moved over it: a symbolic link stays a link, and the old
+# list stays whole until the new one is complete.
 forget() {
 	if [ ! -e "$mimeapps" ]; then return; fi
 	awk -v ours="$ours" -v records="$1" '
@@ -302,7 +315,13 @@ forget() {
 			}
 		}
 		{ print }' "$mimeapps" >"$tmp/mimeapps.list"
-	cat "$tmp/mimeapps.list" >"$mimeapps"
+	if cmp -s "$tmp/mimeapps.list" "$mimeapps"; then return; fi
+	target=$(readlink -f -- "$mimeapps")
+	part=${target%/*}/.${target##*/}.$app.part
+	if ! { cp -p -- "$target" "$part" && cat "$tmp/mimeapps.list" >"$part" && mv -f -- "$part" "$target"; }; then
+		rm -f -- "$part"
+		fail "cannot write $mimeapps"
+	fi
 }
 
 uninstall() {
