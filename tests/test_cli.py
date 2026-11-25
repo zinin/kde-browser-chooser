@@ -112,6 +112,18 @@ def test_long_first_link_keeps_the_counter(run, fakes):
     assert args[args.index("--menu") + 1] == "<qt>" + long[:102] + "... (+1)</qt>"
 
 
+def test_control_characters_show_as_replacement_characters(run, fakes):
+    """The label stays one line; the browser gets the link as it came."""
+    link = "https://e.com/a\nb\tc\x1bd"
+    shown = "https://e.com/a�b�c�d"
+    fakes.add("kdialog", out="chrome\n")
+    run([link, "u2"], ImportError("no PyQt6"))
+    assert run.shown[0][1:3] == (shown, "(+1)")
+    args = fakes.args("kdialog")
+    assert args[args.index("--menu") + 1] == f"<qt>{shown} (+1)</qt>"
+    assert run.done == [("chrome", [link, "u2"])]
+
+
 def test_browser_gets_the_token_of_the_window(run, monkeypatch):
     monkeypatch.setenv("XDG_ACTIVATION_TOKEN", "old")
     run([URL], "chrome", token="fresh")

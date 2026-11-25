@@ -2,6 +2,7 @@ import os
 import shlex
 import signal
 import sys
+import unicodedata
 from dataclasses import replace
 
 from . import __version__, actions, child, config, desktop, fallback, i18n, paths, state, tiles, window
@@ -28,6 +29,11 @@ def load(urls: list[str], settings: config.Config) -> tuple[list[Tile], dict[str
     return tiles.build(desktop.find_browsers(os.environ, language), settings, strings, bool(urls)), strings
 
 
+def one_line(link: str) -> str:
+    """The link as shown: every control character in it, such as a newline, becomes U+FFFD."""
+    return "".join("\ufffd" if unicodedata.category(char) == "Cc" else char for char in link)
+
+
 def show_window(choices: list[Tile], label: str, counter: str, last: str, strings: dict[str, str]) -> list[str | None]:
     """Runs in a child process: returns the id of the chosen tile and the activation token for it."""
     picked = window.pick(choices, label, counter, last, strings)
@@ -44,7 +50,7 @@ def choose(urls: list[str]) -> int:
     if error:
         notify("dialog-warning", strings["config_error"], f"{paths.config_file(os.environ)}: {error}")
 
-    label = urls[0] if urls else strings["no_link"]
+    label = one_line(urls[0]) if urls else strings["no_link"]
     counter = ""  # apart from the link, so that cutting a long link leaves it
     if len(urls) > 1:
         counter = strings["more_links"].format(n=len(urls) - 1)

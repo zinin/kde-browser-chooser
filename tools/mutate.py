@@ -80,6 +80,7 @@ MUTATIONS = [
     ("cli", "Ctrl+C does not work", "signal.signal(signal.SIGINT, signal.SIG_DFL)", "pass", "ctrl_c"),
     ("cli", "an ignored SIGCHLD stays ignored", "signal.signal(signal.SIGCHLD, signal.SIG_DFL)", "pass", "sigchld"),
     ("cli", "no counter of links", "if len(urls) > 1:", "if False:", "remembers"),
+    ("cli", "control characters break the label into lines", 'unicodedata.category(char) == "Cc"', "False", "control_characters"),
     ("log", "a closed stderr loses the link", "contextlib.suppress(Exception)", "contextlib.suppress(KeyError)", "dead_stderr"),
     ("../../tools/build", "other people's PYTHONPATH", 'b"#!/usr/bin/python3 -I\\n"', 'b"#!/usr/bin/python3\\n"', "runs_isolated"),
     ("../../install.sh", "checksums are not checked", 'if [ -z "$want" ] || [ "$got" != "$want" ]; then', "if false; then", "bad_checksum"),
