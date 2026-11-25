@@ -189,6 +189,52 @@ def test_no_default_option(home):
     assert home.program.exists() and home.defaults() == ALL_CHROME
 
 
+@pytest.mark.parametrize("options, env, answers", [
+    (["--no-default"], {}, ""), ([], {}, "n\n"), ([], {"KBC_TTY": "/nonexistent"}, "")],
+    ids=["--no-default", "no", "no terminal"])
+def test_not_becoming_the_default_keeps_the_browser(fresh, options, env, answers):
+    """Chrome is merely installed, so our entry in the user's own directory would take its place."""
+    fresh.set("other", "chrome.desktop")
+    fresh.env |= env
+    assert fresh.run(*options, answers=answers) == 0, fresh.output
+    assert [fresh.desktop.effective(mime) for mime in MIMES] == ["chrome.desktop"] * len(MIMES)
+    assert fresh.defaults() == dict.fromkeys(MIMES, "chrome.desktop")
+    assert fresh.output.count("kept chrome.desktop as the default browser;") == 1
+
+
+@pytest.mark.parametrize("kind", ["system", None])
+def test_a_browser_that_stays_effective_needs_no_keeping(fresh, kind):
+    if kind:
+        fresh.set(kind, "chrome.desktop")
+    assert fresh.run("--no-default") == 0, fresh.output
+    assert not fresh.desktop.mimeapps.exists() and "kept" not in fresh.output
+
+
+def test_becoming_the_default_keeps_nothing(fresh):
+    fresh.set("other", "chrome.desktop")
+    assert fresh.run("--yes") == 0, fresh.output
+    assert fresh.defaults() == ALL_OURS and "kept" not in fresh.output
+
+
+def test_an_explicit_choice_stays_as_it_was(home):
+    before = home.desktop.mimeapps.read_bytes()
+    assert home.run("--no-default") == 0, home.output
+    assert home.desktop.mimeapps.read_bytes() == before and "kept" not in home.output
+
+
+def test_kept_lines_change_no_other_line(fresh, tmp_path):
+    fresh.set("other", "chrome.desktop")
+    text = "# mine\n[Added Associations]\nimage/png=gimp.desktop;\n\n[Default Applications]\nimage/png=gwenview.desktop\n"
+    real = tmp_path / "dotfiles-mimeapps"
+    real.write_text(text)
+    fresh.desktop.mimeapps.parent.mkdir(parents=True)
+    fresh.desktop.mimeapps.symlink_to(real)
+    assert fresh.run("--no-default") == 0, fresh.output
+    assert fresh.desktop.mimeapps.is_symlink()
+    assert [line for line in real.read_text().splitlines() if not line.endswith("=chrome.desktop")] == text.splitlines()
+    assert fresh.defaults() == {"image/png": "gwenview.desktop", **dict.fromkeys(MIMES, "chrome.desktop")}
+
+
 def test_bad_checksum_installs_nothing(home, dist, tmp_path):
     broken = shutil.copytree(dist, tmp_path / "broken")
     with open(broken / APP, "ab") as file:

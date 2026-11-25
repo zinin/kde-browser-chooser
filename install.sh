@@ -269,6 +269,47 @@ make_default() {
 	fi
 }
 
+# note_effective writes down, for each type of our entry that the user has not chosen, the program that
+# opens it now: our entry can take its place just by being there.
+note_effective() {
+	: >"$tmp/effective"
+	if ! has xdg-mime; then return; fi
+	for key in $keys; do
+		if [ "$key" = kdeglobals ] || [ -n "$(chosen "$key")" ]; then continue; fi
+		value=$(xdg-mime query default "$key" </dev/null 2>/dev/null) || value=
+		if [ -n "$value" ] && ! is_ours "$value"; then echo "$key=$value"; fi
+	done >"$tmp/effective"
+}
+
+# keep_effective makes the noted programs the user's choice where our entry has taken their place, so that
+# not becoming the default browser changes nothing.
+keep_effective() {
+	while IFS= read -r line; do
+		key=${line%%=*}
+		if [ -z "$(chosen "$key")" ] && is_ours "$(xdg-mime query default "$key" </dev/null 2>/dev/null)"; then
+			echo "$line"
+		fi
+	done <"$tmp/effective" >"$tmp/kept"
+	if [ ! -s "$tmp/kept" ]; then return; fi
+	mkdir -p "$config_home"
+	if [ -e "$mimeapps" ]; then cat "$mimeapps"; fi >"$tmp/current"
+	# The lines go first into the group, which is added at the end if it is missing; no other line changes.
+	awk -v kept="$tmp/kept" '
+		function add(line) { while ((getline line < kept) > 0) print line; added = 1 }
+		{ print; last = $0 }
+		$0 == "[Default Applications]" && !added { add() }
+		END {
+			if (added) exit
+			if (NR && last != "") print ""
+			print "[Default Applications]"
+			add()
+		}' "$tmp/current" >"$tmp/mimeapps.list"
+	write_list "$tmp/mimeapps.list"
+	entries=$(awk '{ value = substr($0, index($0, "=") + 1) } !seen[value]++ { list = list sep value; sep = ", " }
+		END { print list }' "$tmp/kept")
+	say "kept $entries as the default browser; make $app the default browser in $by_hand, if you want it."
+}
+
 # exists tells whether there still is what $1 chooses: a desktop entry, a list of them or a !command.
 exists() (
 	case $1 in
@@ -284,10 +325,22 @@ exists() (
 	exit 1
 )
 
+# write_list puts the list $1 in place of mimeapps.list. An unchanged list is left alone. A changed one is
+# written beside the file that the name leads to, with its permissions, and moved over it: a symbolic link
+# stays a link, and the old list stays whole until the new one is complete.
+write_list() {
+	if [ -e "$mimeapps" ] && cmp -s "$1" "$mimeapps"; then return; fi
+	target=$(readlink -f -- "$mimeapps")
+	part=${target%/*}/.${target##*/}.$app.part
+	# A copy of the old list gives the new one its permissions; a list made anew gets the usual ones.
+	if ! { { [ ! -e "$target" ] || cp -p -- "$target" "$part"; } && cat "$1" >"$part" && mv -f -- "$part" "$target"; }; then
+		rm -f -- "$part"
+		fail "cannot write $mimeapps"
+	fi
+}
+
 # forget takes our entry out of mimeapps.list; the file $1 has a line "type=previous choice" for each
-# type that is still ours. An unchanged list is left alone. A changed one is written beside the file that
-# the name leads to, with its permissions, and moved over it: a symbolic link stays a link, and the old
-# list stays whole until the new one is complete.
+# type that is still ours.
 forget() {
 	if [ ! -e "$mimeapps" ]; then return; fi
 	awk -v ours="$ours" -v records="$1" '
@@ -315,13 +368,7 @@ forget() {
 			}
 		}
 		{ print }' "$mimeapps" >"$tmp/mimeapps.list"
-	if cmp -s "$tmp/mimeapps.list" "$mimeapps"; then return; fi
-	target=$(readlink -f -- "$mimeapps")
-	part=${target%/*}/.${target##*/}.$app.part
-	if ! { cp -p -- "$target" "$part" && cat "$tmp/mimeapps.list" >"$part" && mv -f -- "$part" "$target"; }; then
-		rm -f -- "$part"
-		fail "cannot write $mimeapps"
-	fi
+	write_list "$tmp/mimeapps.list"
 }
 
 uninstall() {
@@ -414,8 +461,10 @@ main() {
 	check_python
 	download
 	ensure_pyqt
+	note_effective
 	place
 	if [ "$want_default" = 1 ]; then make_default; fi
+	if ! is_chosen; then keep_effective; fi
 }
 
 # In braces, so that a download cut short runs nothing.
