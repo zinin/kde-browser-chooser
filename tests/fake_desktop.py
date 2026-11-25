@@ -38,10 +38,16 @@ class Desktop:
         self.apps = Path(env.get("XDG_DATA_HOME") or home / ".local/share") / "applications"
         self.registry = Path(env["REGISTRY"])
 
+    def entry_file(self, entry):
+        """The file of an entry id. As in KDE, the id of applications/vendor/browser.desktop is
+        vendor-browser.desktop; this holds for every entry, the distribution's choice included."""
+        return next((path for path in sorted(self.apps.rglob("*.desktop"))
+                     if "-".join(path.relative_to(self.apps).parts) == entry), self.apps / entry)
+
     def usable(self, entry):
         """xdg-utils take the first word of Exec for the program, quotes and all."""
         try:
-            lines = (self.apps / entry).read_text().splitlines()
+            lines = self.entry_file(entry).read_text().splitlines()
         except OSError:
             return False
         command = next(line for line in lines if line.startswith("Exec=")).removeprefix("Exec=")

@@ -98,6 +98,8 @@ MUTATIONS = [
     ("../../install.sh", "not becoming the default lets our entry take over", "\tif ! is_chosen; then keep_effective; fi\n", "", "keeps_the_browser"),
     ("../../install.sh", "a browser that was not displaced is written down", 'is_ours "$(xdg-mime query default "$key" </dev/null 2>/dev/null)"', "true", "needs_no_keeping"),
     ("../../install.sh", "the kept browser goes unmentioned", 'say "kept $entries', ': "kept $entries', "keeps_the_browser"),
+    ("../../install.sh", "a restored choice that did not take is silent", '! listed "$value" "$(xdg-mime query default "${line%%=*}" </dev/null 2>/dev/null)"', "false", "previous_browser_is_gone"),
+    ("../../install.sh", "only the first entry of a list counts", 'case ";$1;" in', 'case ";${1%%;*};" in', "first_entry_is_gone"),
 ]
 
 

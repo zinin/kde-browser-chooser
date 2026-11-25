@@ -346,11 +346,37 @@ def test_settings_keep_their_permissions(home):
     assert [path.name for path in home.desktop.mimeapps.parent.iterdir() if path.name.startswith(".")] == []
 
 
-def test_uninstall_when_the_previous_browser_is_gone(home):
+@pytest.mark.parametrize("other", [None, "firefox.desktop"])
+def test_uninstall_when_the_previous_browser_is_gone(home, other):
+    """The choice comes back as it was; KDE then picks another browser, or none."""
+    if other:
+        home.set("other", other)
     home.run("--yes")
     (home.desktop.apps / "chrome.desktop").unlink()
     assert home.run("--uninstall") == 0
+    assert home.defaults() == ALL_CHROME
     assert "System Settings" in home.output and home.traces() == [] and not home.program.exists()
+
+
+def test_uninstall_restores_a_list_whose_first_entry_is_gone(home):
+    chosen = ALL_CHROME | dict.fromkeys(MIMES, "missing.desktop;chrome.desktop;")
+    home.choose(chosen)
+    home.run("--yes")
+    assert home.run("--uninstall") == 0, home.output
+    assert home.defaults() == chosen
+    assert [home.desktop.effective(mime) for mime in MIMES] == ["chrome.desktop"] * len(MIMES)
+    assert "System Settings" not in home.output
+
+
+def test_uninstall_restores_an_entry_from_a_subdirectory(home):
+    home.add_entry("vendor/chrome.desktop")
+    chosen = dict.fromkeys([*MIMES, "kdeglobals"], "vendor-chrome.desktop")
+    home.choose(chosen)
+    home.run("--yes")
+    assert home.run("--uninstall") == 0, home.output
+    assert home.defaults() == chosen
+    assert [home.desktop.effective(mime) for mime in MIMES] == ["vendor-chrome.desktop"] * len(MIMES)
+    assert "System Settings" not in home.output
 
 
 def test_uninstall_nothing(home):

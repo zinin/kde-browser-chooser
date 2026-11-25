@@ -310,20 +310,13 @@ keep_effective() {
 	say "kept $entries as the default browser; make $app the default browser in $by_hand, if you want it."
 }
 
-# exists tells whether there still is what $1 chooses: a desktop entry, a list of them or a !command.
-exists() (
-	case $1 in
-	!*) exit 0 ;;
+# listed tells whether $2, which is not empty, is one of the entries of the list $1; ";" parts them.
+listed() {
+	case ";$1;" in
+	*";$2;"*) [ -n "$2" ] ;;
+	*) return 1 ;;
 	esac
-	dirs=${XDG_DATA_HOME:-$HOME/.local/share}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}
-	dirs=$dirs:$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/var/lib/snapd/desktop
-	set -f
-	IFS=:
-	for dir in $dirs; do
-		[ ! -e "$dir/applications/${1%%;*}" ] || exit 0
-	done
-	exit 1
-)
+}
 
 # write_list puts the list $1 in place of mimeapps.list. An unchanged list is left alone. A changed one is
 # written beside the file that the name leads to, with its permissions, and moved over it: a symbolic link
@@ -377,10 +370,6 @@ uninstall() {
 	for key in $keys; do
 		if ! is_ours "$(chosen "$key")"; then continue; fi
 		value=$(recorded "$key")
-		if [ -n "$value" ] && ! exists "$value"; then
-			value=
-			lost=1
-		fi
 		if [ "$key" != kdeglobals ]; then
 			echo "$key=$value" >>"$tmp/previous"
 		elif [ -n "$value" ]; then
@@ -398,6 +387,15 @@ uninstall() {
 		rmdir "${config_home:?}/${app:?}" 2>/dev/null || true
 	fi
 	refresh
+	# Every choice comes back as it was, even one whose entries are gone; KDE then picks a browser itself.
+	if has xdg-mime; then
+		while IFS= read -r line; do
+			value=${line#*=}
+			if [ -n "$value" ] && ! listed "$value" "$(xdg-mime query default "${line%%=*}" </dev/null 2>/dev/null)"; then
+				lost=1
+			fi
+		done <"$tmp/previous"
+	fi
 	if has xdg-mime && [ -z "$(xdg-mime query default x-scheme-handler/https 2>/dev/null)" ]; then lost=1; fi
 	if [ "$lost" = 1 ]; then say "choose another default browser in $by_hand."; fi
 	say "removed"
