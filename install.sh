@@ -250,9 +250,9 @@ make_default() {
 	ask "Make it the default browser?" "$suggested" || return 0
 	save_previous
 	mkdir -p "$config_home" # xdg-mime would lose its first change without it
-	xdg-settings set default-web-browser "$ours" >/dev/null 2>&1 || true
+	keep_link xdg-settings set default-web-browser "$ours" >/dev/null 2>&1 || true
 	if is_chosen; then
-		xdg-mime default "$ours" application/xhtml+xml >/dev/null 2>&1 || true
+		keep_link xdg-mime default "$ours" application/xhtml+xml >/dev/null 2>&1 || true
 	else
 		say "that had no effect; make it the default browser in $by_hand."
 		return 0
@@ -318,18 +318,41 @@ listed() {
 	esac
 }
 
-# write_list puts the list $1 in place of mimeapps.list. An unchanged list is left alone. A changed one is
-# written beside the file that the name leads to, with its permissions, and moved over it: a symbolic link
-# stays a link, and the old list stays whole until the new one is complete.
+# write_list puts the list $1 in place of the file $2, mimeapps.list by default. An unchanged list is left
+# alone. A changed one is written beside the file that the name leads to, with its permissions, and moved
+# over it: a symbolic link stays a link, and the old list stays whole until the new one is complete.
 write_list() {
-	if [ -e "$mimeapps" ] && cmp -s "$1" "$mimeapps"; then return; fi
-	target=$(readlink -f -- "$mimeapps")
+	list_file=${2:-$mimeapps}
+	if [ -e "$list_file" ] && cmp -s "$1" "$list_file"; then return; fi
+	target=$(readlink -f -- "$list_file")
 	part=${target%/*}/.${target##*/}.$app.part
 	# A copy of the old list gives the new one its permissions; a list made anew gets the usual ones.
 	if ! { { [ ! -e "$target" ] || cp -p -- "$target" "$part"; } && cat "$1" >"$part" && mv -f -- "$part" "$target"; }; then
 		rm -f -- "$part"
-		fail "cannot write $mimeapps"
+		fail "cannot write $list_file"
 	fi
+}
+
+# keep_link runs the command $@ and keeps mimeapps.list a symbolic link if it is one: xdg-utils write a new
+# list beside it and move that over the link. The command's exit status is passed on.
+keep_link() {
+	if [ ! -L "$mimeapps" ]; then
+		"$@"
+		return
+	fi
+	link_text=$(readlink -- "$mimeapps")
+	link_target=$(readlink -f -- "$mimeapps") || link_target=
+	link_status=0
+	"$@" || link_status=$?
+	if [ -n "$link_target" ] && [ ! -L "$mimeapps" ] && [ -f "$mimeapps" ]; then
+		write_list "$mimeapps" "$link_target"
+		link_part=${mimeapps%/*}/.${mimeapps##*/}.$app.link
+		if ! { rm -f -- "$link_part" && ln -s -- "$link_text" "$link_part" && mv -f -- "$link_part" "$mimeapps"; }; then
+			rm -f -- "$link_part"
+			fail "cannot put the link $mimeapps back"
+		fi
+	fi
+	return "$link_status"
 }
 
 # forget takes our entry out of mimeapps.list; the file $1 has a line "type=previous choice" for each

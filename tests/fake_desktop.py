@@ -3,6 +3,8 @@
 
 They work on the files of $HOME. $REGISTRY/system is the browser the distribution chose explicitly,
 $REGISTRY/other a browser that is merely installed. With $REGISTRY/html-fails xdg-settings fails on text/html.
+xdg-settings and xdg-mime default write mimeapps.list as xdg-utils do on KDE: into mimeapps.list.new, then renamed
+over it, so that a symbolic link becomes a file.
 """
 import os
 import shutil
@@ -24,10 +26,16 @@ def read(path):
     return groups
 
 
-def write(path, groups):
+def write(path, groups, renamed=False):
+    """Writes the file in place, or renamed: into path.new beside it, then renamed over it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(f"{group}\n" + "".join(f"{k}={v}\n" for k, v in keys.items()) + "\n"
-                            for group, keys in groups.items()))
+    text = "".join(f"{group}\n" + "".join(f"{k}={v}\n" for k, v in keys.items()) + "\n" for group, keys in groups.items())
+    if renamed:
+        new = path.with_name(path.name + ".new")
+        new.write_text(text)
+        new.replace(path)
+    else:
+        path.write_text(text)
 
 
 class Desktop:
@@ -68,7 +76,7 @@ class Desktop:
         groups.setdefault(DEFAULTS, {})[mime] = entry
         added = groups.setdefault(ADDED, {})
         added[mime] = "".join(f"{e};" for e in dict.fromkeys([entry, *added.get(mime, "").split(";")]) if e)
-        write(self.mimeapps, groups)
+        write(self.mimeapps, groups, renamed=True)
 
     def browser(self, value=None, delete=False):
         groups = read(self.kdeglobals)

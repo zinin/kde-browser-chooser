@@ -100,6 +100,8 @@ MUTATIONS = [
     ("../../install.sh", "the kept browser goes unmentioned", 'say "kept $entries', ': "kept $entries', "keeps_the_browser"),
     ("../../install.sh", "a restored choice that did not take is silent", '! listed "$value" "$(xdg-mime query default "${line%%=*}" </dev/null 2>/dev/null)"', "false", "previous_browser_is_gone"),
     ("../../install.sh", "only the first entry of a list counts", 'case ";$1;" in', 'case ";${1%%;*};" in', "first_entry_is_gone"),
+    ("../../install.sh", "xdg-utils turn a linked list into a file", 'if [ -n "$link_target" ] && [ ! -L "$mimeapps" ] && [ -f "$mimeapps" ]; then', "if false; then", "stay_linked"),
+    ("../../install.sh", "a relative link becomes absolute", 'link_text=$(readlink -- "$mimeapps")', 'link_text=$(readlink -f -- "$mimeapps")', "stay_linked"),
 ]
 
 

@@ -15,7 +15,7 @@ SCRIPT = ROOT / "install.sh"
 APP = "kde-browser-chooser"
 OURS = f"{APP}.desktop"
 MIMES = ["x-scheme-handler/http", "x-scheme-handler/https", "text/html", "application/xhtml+xml"]
-CORE = ("sh awk cat chmod cmp cp curl cut grep head mkdir mktemp mv readlink rm rmdir sed sha256sum tr uname").split()
+CORE = ("sh awk cat chmod cmp cp curl cut grep head ln mkdir mktemp mv readlink rm rmdir sed sha256sum tr uname").split()
 ALL_OURS = dict.fromkeys([*MIMES, "kdeglobals"], OURS)
 ALL_CHROME = dict.fromkeys([*MIMES, "kdeglobals"], "chrome.desktop")
 
@@ -321,13 +321,18 @@ def test_other_settings_are_untouched(home):
     assert groups["[Removed Associations]"] == {"image/png": "x.desktop;"}
 
 
-def test_linked_settings_stay_linked(home, tmp_path):
+@pytest.mark.parametrize("relative", [False, True])
+def test_linked_settings_stay_linked(home, tmp_path, relative):
+    """xdg-utils write a new mimeapps.list beside the old one and rename it over a link."""
     real = tmp_path / "dotfiles-mimeapps"
     home.desktop.mimeapps.rename(real)
-    home.desktop.mimeapps.symlink_to(real)
-    home.run("--yes")
+    link = os.path.relpath(real, home.desktop.mimeapps.parent) if relative else str(real)
+    home.desktop.mimeapps.symlink_to(link)
+    assert home.run("--yes") == 0, home.output
+    assert os.readlink(home.desktop.mimeapps) == link
+    assert fake_desktop.read(real)[fake_desktop.DEFAULTS] == dict.fromkeys(MIMES, OURS)
     home.run("--uninstall")
-    assert home.desktop.mimeapps.is_symlink() and home.defaults() == ALL_CHROME
+    assert os.readlink(home.desktop.mimeapps) == link and home.defaults() == ALL_CHROME
 
 
 def test_unchanged_settings_are_not_rewritten(home):
