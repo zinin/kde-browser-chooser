@@ -156,6 +156,12 @@ def test_notify_never_raises(fakes, capsys):
     assert "Summary" in capsys.readouterr().err
 
 
+def test_notify_shows_what_it_can(fakes):
+    fakes.add("notify-send")
+    notify("edit-copy", "Summary", "nu\0ll")
+    assert fakes.args("notify-send")[-2:] == ["Summary", "null"]
+
+
 def test_gdbus_without_busctl(fakes):
     fakes.add("gdbus")
     assert dbus.call("a.b", "/c", "d.e", "Do", ("s", "it's a \\ b"), ("u", "0"), ("as", ""), ("a{sv}", ""), ("i", "5"))

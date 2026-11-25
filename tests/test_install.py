@@ -239,9 +239,10 @@ def test_uninstall_restores_exactly(home):
 
 def test_uninstall_restores_only_what_is_still_ours(home):
     home.run("--yes")
-    home.choose({"text/html": "kate.desktop"})
+    own = {"text/html": "kate.desktop", "kdeglobals": "firefox.desktop"}
+    home.choose(own)
     home.run("--uninstall")
-    assert home.defaults() == ALL_CHROME | {"text/html": "kate.desktop"}
+    assert home.defaults() == ALL_CHROME | own
 
 
 def test_reinstall_keeps_previous_defaults(home):

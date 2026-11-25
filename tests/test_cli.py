@@ -257,13 +257,14 @@ def pick(*args):
 window.pick = pick
 cli.run()
 """
-    process = subprocess.Popen([sys.executable, "-B", "-c", child, URL])
+    process = subprocess.Popen([sys.executable, "-B", "-c", child, URL], stderr=subprocess.PIPE, text=True)
     deadline = time.monotonic() + 10
     while not ready.exists():
         assert time.monotonic() < deadline
         time.sleep(0.02)
     process.send_signal(signal.SIGINT)
     assert process.wait(1) == -signal.SIGINT
+    assert "Traceback" not in process.communicate()[1]
     while Path("/proc", ready.read_text()).exists():
         assert time.monotonic() < deadline, "the window is still there"
         time.sleep(0.02)
