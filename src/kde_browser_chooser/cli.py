@@ -4,7 +4,7 @@ import signal
 import sys
 from dataclasses import replace
 
-from . import __version__, actions, config, desktop, fallback, i18n, paths, state, tiles, window
+from . import __version__, actions, child, config, desktop, fallback, i18n, paths, state, tiles, window
 from .log import log_exception
 from .model import Tile
 from .notify import notify
@@ -28,6 +28,12 @@ def load(urls: list[str], settings: config.Config) -> tuple[list[Tile], dict[str
     return tiles.build(desktop.find_browsers(os.environ, language), settings, strings, bool(urls)), strings
 
 
+def show_window(choices: list[Tile], label: str, last: str, strings: dict[str, str]) -> list[str | None]:
+    """Runs in a child process: returns the id of the chosen tile and the activation token for it."""
+    picked = window.pick(choices, label, last, strings)
+    return [picked.id if picked else None, os.environ.get("XDG_ACTIVATION_TOKEN")]
+
+
 def choose(urls: list[str]) -> int:
     settings, error = config.Config(), None
     try:
@@ -44,15 +50,13 @@ def choose(urls: list[str]) -> int:
     last_file = paths.last_file(os.environ)
     last = state.read_last(last_file, choices)
     try:
-        picked = window.pick(choices, label, last, strings)
+        picked_id, token = child.run(show_window, choices, label, last, strings)
+        picked = next((tile for tile in choices if tile.id == picked_id), None)
+        if token:
+            os.environ["XDG_ACTIVATION_TOKEN"] = token
     except Exception:
         log_exception()
-        try:
-            picked = fallback.pick_with_kdialog(choices, label, last, strings)
-        except Exception:
-            log_exception()
-            notify("dialog-error", strings["window_failed"], "\n".join(urls))
-            return 1
+        picked = fallback.pick_with_kdialog(choices, label, last, strings)
     if picked is None:
         return 0
     state.save_last(last_file, picked.id)
@@ -80,9 +84,14 @@ def main(argv: list[str]) -> int:
         case ["--help"]:
             print(HELP)
             return 0
-        case ["--", *urls]:
-            return choose(urls)
-    return choose(argv)
+    urls = argv[1:] if argv[:1] == ["--"] else argv
+    try:
+        return choose(urls)
+    except Exception:  # the last resort: a link must never be lost silently
+        log_exception()
+        strings = i18n.load_strings(i18n.pick_language(None, os.environ))
+        notify("dialog-error", strings["window_failed"], "\n".join(urls))
+        return 1
 
 
 def run() -> None:

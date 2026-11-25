@@ -54,7 +54,7 @@ ask() {
 	fi
 	if [ "$2" = y ]; then hint='[Y/n]'; else hint='[y/N]'; fi
 	printf '%s: %s %s ' "$app" "$1" "$hint"
-	read -r answer <&3 || answer=
+	read -r answer <&3 || answer=n # Ctrl+D
 	case ${answer:-$2} in
 	[Yy]*) return 0 ;;
 	*) return 1 ;;
@@ -146,12 +146,15 @@ download() {
 	done
 }
 
-# exec_value quotes the path $1 for Exec as the Desktop Entry Specification wants it.
+# exec_value prints the path $1 as Exec wants it, quoted if the Desktop Entry Specification reserves
+# one of its characters. xdg-utils do not understand a quoted program, but they do understand env.
 exec_value() {
-	case $1 in
-	*[!A-Za-z0-9/._+-]*) printf '"%s"' "$(printf '%s' "$1" | sed -e 's/["`$]/\\\\&/g' -e 's/%/%%/g')" ;;
-	*) printf '%s' "$1" ;;
-	esac
+	reserved=$(printf '%s' "$1" | LC_ALL=C tr -d 'A-Za-z0-9/._+@:,=\200-\377-')
+	if [ -z "$reserved" ]; then
+		printf '%s' "$1"
+	else
+		printf '/usr/bin/env "%s"' "$(printf '%s' "$1" | sed -e 's/["`$]/\\\\&/g' -e 's/%/%%/g')"
+	fi
 }
 
 refresh() {
@@ -161,16 +164,20 @@ refresh() {
 
 place() {
 	mkdir -p "$bin_dir" "$apps_dir"
-	cp "$tmp/$app" "$bin_dir/.$app.new"
-	chmod 755 "$bin_dir/.$app.new"
-	mv -f "$bin_dir/.$app.new" "$bin_dir/$app"
+	new=${bin_dir:?}/.${app:?}.new
+	cp "$tmp/$app" "$new"
+	chmod 755 "$new"
+	if ! installed=$("$new" --version); then
+		rm -f "${new:?}"
+		fail "the program does not run on this system"
+	fi
+	mv -f "$new" "$bin_dir/$app"
 	EXEC=$(exec_value "$bin_dir/$app") awk '
 		{ at = index($0, "@EXEC@") }
 		at { $0 = substr($0, 1, at - 1) ENVIRON["EXEC"] substr($0, at + 6) }
 		{ print }' "$tmp/$ours" >"$apps_dir/.$ours.new"
 	mv -f "$apps_dir/.$ours.new" "$apps_dir/$ours"
 	refresh
-	installed=$("$bin_dir/$app" --version) || fail "$bin_dir/$app does not run on this system"
 	say "$installed is in $bin_dir"
 	case ":$PATH:" in
 	*":$bin_dir:"*) ;;
@@ -178,14 +185,36 @@ place() {
 	esac
 }
 
-# current prints what is the default for the key $1 now, and recorded what it was before us.
-current() {
+# setting prints the value of the key $3 in the group $2 of the file $1.
+setting() {
+	if [ -e "$1" ]; then
+		awk -v group="$2" -v key="$3=" '
+			/^\[/ { inside = ($0 == group) }
+			inside && index($0, key) == 1 { print substr($0, length(key) + 1); exit }' "$1"
+	fi
+}
+
+# chosen prints what the user has chosen for the key $1. The effective default would not do: our entry
+# can become that just by being there.
+chosen() {
 	case $1 in
-	kdeglobals) kreadconfig6 --file kdeglobals --group General --key BrowserApplication 2>/dev/null || true ;;
-	*) xdg-mime query default "$1" 2>/dev/null || true ;;
+	kdeglobals) setting "$config_home/kdeglobals" '[General]' BrowserApplication ;;
+	*) setting "$mimeapps" '[Default Applications]' "$1" ;;
 	esac
 }
 
+is_ours() {
+	case $1 in
+	"$ours" | "$ours;"*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+is_chosen() {
+	is_ours "$(chosen x-scheme-handler/http)" && is_ours "$(chosen x-scheme-handler/https)"
+}
+
+# recorded prints what was chosen for the key $1 before us.
 recorded() {
 	if [ -e "$state_dir/previous-defaults" ]; then
 		awk -v key="$1=" 'index($0, key) == 1 { print substr($0, length(key) + 1) }' "$state_dir/previous-defaults"
@@ -195,15 +224,11 @@ recorded() {
 save_previous() {
 	mkdir -p "$state_dir"
 	for key in $keys; do
-		value=$(current "$key")
-		if [ "$value" = "$ours" ]; then value=$(recorded "$key"); fi
+		value=$(chosen "$key")
+		if is_ours "$value"; then value=$(recorded "$key"); fi
 		if [ -n "$value" ]; then echo "$key=$value"; fi
 	done >"$state_dir/previous-defaults.new"
 	mv -f "$state_dir/previous-defaults.new" "$state_dir/previous-defaults"
-}
-
-is_default() {
-	[ "$(xdg-settings get default-web-browser 2>/dev/null || true)" = "$ours" ]
 }
 
 make_default() {
@@ -211,7 +236,7 @@ make_default() {
 		say "there is no xdg-settings; make it the default browser in $by_hand."
 		return
 	fi
-	if is_default; then return; fi
+	if is_chosen; then return; fi
 	suggested=y
 	if ! has_pyqt; then
 		if ! has kdialog; then
@@ -223,45 +248,92 @@ make_default() {
 	fi
 	ask "Make it the default browser?" "$suggested" || return 0
 	save_previous
-	xdg-settings set default-web-browser "$ours" 2>/dev/null || true
-	xdg-mime default "$ours" application/xhtml+xml 2>/dev/null || true
-	if is_default; then
+	mkdir -p "$config_home" # xdg-mime would lose its first change without it
+	xdg-settings set default-web-browser "$ours" >/dev/null 2>&1 || true
+	if is_chosen; then
+		xdg-mime default "$ours" application/xhtml+xml >/dev/null 2>&1 || true
 		say "it is the default browser now; programs already running may need a restart."
 	else
 		say "that had no effect; make it the default browser in $by_hand."
 	fi
 }
 
-entry_exists() (
+# exists tells whether there still is what $1 chooses: a desktop entry, a list of them or a !command.
+exists() (
+	case $1 in
+	!*) exit 0 ;;
+	esac
 	dirs=${XDG_DATA_HOME:-$HOME/.local/share}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}
 	dirs=$dirs:$HOME/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/var/lib/snapd/desktop
 	set -f
 	IFS=:
 	for dir in $dirs; do
-		[ ! -e "$dir/applications/$1" ] || exit 0
+		[ ! -e "$dir/applications/${1%%;*}" ] || exit 0
 	done
 	exit 1
 )
 
-restore() {
-	case $1 in
-	kdeglobals) kwriteconfig6 --file kdeglobals --group General --key BrowserApplication "$2" ;;
-	*) xdg-mime default "$2" "$1" ;;
-	esac
+# forget takes our entry out of mimeapps.list; the file $1 has a line "type=previous choice" for each
+# type that is still ours. The list is written in place, for it may be a symbolic link.
+forget() {
+	if [ ! -e "$mimeapps" ]; then return; fi
+	awk -v ours="$ours" -v records="$1" '
+		function without(list, items, count, i, rest) {
+			count = split(list, items, ";")
+			for (i = 1; i <= count; i++)
+				if (items[i] != "" && items[i] != ours) rest = rest items[i] ";"
+			return rest
+		}
+		BEGIN {
+			while ((getline line < records) > 0) {
+				at = index(line, "=")
+				previous[substr(line, 1, at - 1)] = substr(line, at + 1)
+			}
+		}
+		/^\[/ { group = $0 }
+		group == "[Default Applications]" || group == "[Added Associations]" {
+			at = index($0, "=")
+			if (at && index(";" substr($0, at + 1) ";", ";" ours ";")) {
+				key = substr($0, 1, at - 1)
+				value = without(substr($0, at + 1))
+				if (group == "[Default Applications]" && previous[key] != "") value = previous[key]
+				if (value == "") next
+				$0 = key "=" value
+			}
+		}
+		{ print }' "$mimeapps" >"$tmp/mimeapps.list"
+	cat "$tmp/mimeapps.list" >"$mimeapps"
 }
 
 uninstall() {
-	left=0
+	lost=0
+	: >"$tmp/previous"
 	for key in $keys; do
-		if [ "$(current "$key")" != "$ours" ]; then continue; fi
+		if ! is_ours "$(chosen "$key")"; then continue; fi
 		value=$(recorded "$key")
-		if [ -z "$value" ] || ! entry_exists "$value" || ! restore "$key" "$value"; then left=1; fi
+		if [ -n "$value" ] && ! exists "$value"; then
+			value=
+			lost=1
+		fi
+		if [ "$key" != kdeglobals ]; then
+			echo "$key=$value" >>"$tmp/previous"
+		elif [ -n "$value" ]; then
+			kwriteconfig6 --file kdeglobals --group General --key BrowserApplication "$value" || lost=1
+		else
+			kwriteconfig6 --file kdeglobals --group General --key BrowserApplication --delete "" || true
+		fi
 	done
-	rm -f "$bin_dir/$app" "$apps_dir/$ours"
-	rm -rf "$state_dir"
-	if [ "$purge" = 1 ]; then rm -rf "$config_dir"; fi
+	forget "$tmp/previous"
+	rm -f "${bin_dir:?}/${app:?}" "${apps_dir:?}/${ours:?}"
+	rm -f "${state_dir:?}/previous-defaults" "${state_dir:?}/last"
+	rmdir "${state_dir:?}" 2>/dev/null || true
+	if [ "$purge" = 1 ]; then
+		rm -f "${config_home:?}/${app:?}/config.toml"
+		rmdir "${config_home:?}/${app:?}" 2>/dev/null || true
+	fi
 	refresh
-	if [ "$left" = 1 ]; then say "choose another default browser in $by_hand."; fi
+	if has xdg-mime && [ -z "$(xdg-mime query default x-scheme-handler/https 2>/dev/null)" ]; then lost=1; fi
+	if [ "$lost" = 1 ]; then say "choose another default browser in $by_hand."; fi
 	say "removed"
 }
 
@@ -292,13 +364,21 @@ main() {
 		esac
 		shift
 	done
+	if [ "$purge" = 1 ] && [ "$action" != uninstall ]; then
+		usage >&2
+		exit 2
+	fi
 
 	check_system
 	python=${KBC_PYTHON:-/usr/bin/python3}
 	bin_dir=${KBC_INSTALL_DIR:-$HOME/.local/bin}
 	apps_dir=${XDG_DATA_HOME:-$HOME/.local/share}/applications
 	state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/$app
-	config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/$app
+	config_home=${XDG_CONFIG_HOME:-$HOME/.config}
+	mimeapps=$config_home/mimeapps.list
+	tmp=$(mktemp -d)
+	trap 'rm -rf "${tmp:?}"' EXIT
+	trap 'exit 1' INT TERM
 	if [ "$action" = uninstall ]; then
 		uninstall
 		return
@@ -313,9 +393,6 @@ main() {
 	fi
 	check_desktop
 	check_python
-	tmp=$(mktemp -d)
-	trap 'rm -rf "$tmp"' EXIT
-	trap 'exit 1' INT TERM
 	download
 	ensure_pyqt
 	place

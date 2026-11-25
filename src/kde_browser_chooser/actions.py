@@ -1,5 +1,4 @@
 """What the tiles do: copy the link or become the browser."""
-import contextlib
 import os
 import re
 import signal
@@ -29,19 +28,11 @@ def expand_for(command: tuple[str, ...], urls: list[str]) -> list[str]:
 
 
 def become(argv: list[str]) -> None:
-    """Replaces this process with the browser, leaving it no traces of Python and Qt."""
+    """Replaces this process with the browser."""
     # Python ignores these signals, and the browser would inherit that.
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
-    # Qt keeps the graphics card (/dev/dri/renderD*) open without O_CLOEXEC.
-    for fd in map(int, os.listdir("/proc/self/fd")):
-        if fd > 2:
-            with contextlib.suppress(OSError):  # the descriptor of listdir itself is gone
-                os.set_inheritable(fd, False)
-    # os.environ on purpose: Qt removes XDG_ACTIVATION_TOKEN from the process
-    # environment once it shows a window, and without a token the browser
-    # would stay behind other windows.
-    os.execvpe(argv[0], argv, os.environ)
+    os.execvp(argv[0], argv)
 
 
 def launch(tile: Tile, urls: list[str], strings: Mapping[str, str]) -> int:
@@ -51,8 +42,9 @@ def launch(tile: Tile, urls: list[str], strings: Mapping[str, str]) -> int:
         for argv in others:
             subprocess.Popen(argv, start_new_session=True)
         become(last)
-    except OSError as error:
-        notify("dialog-error", strings["launch_failed"].format(name=tile.title), f"{error.strerror}: {last[0]}")
+    except (OSError, ValueError) as error:  # ValueError: a null byte in the command
+        reason = getattr(error, "strerror", None) or error
+        notify("dialog-error", strings["launch_failed"].format(name=tile.title), f"{reason}: {last[0]}")
     return 1
 
 

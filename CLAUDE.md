@@ -19,7 +19,11 @@ chosen one. Standard library and the distribution's PyQt6 only; everything else 
 - `cli` imports every module of the package; PyQt6 is imported only inside `window.pick` and
   `activation`. An update replaces the archive under an open window, and without PyQt6 the fallback
   must still work.
-- `actions.become` passes `os.environ`, not the process environment: Qt removes the token from the latter.
+- The window runs in a child process (`child.run`): Qt aborts without a display, and no crash may lose
+  the link. The child returns the choice and the activation token; the parent, which never loads Qt,
+  becomes the browser.
+- `install.sh` goes by what the user chose (their `mimeapps.list` and `kdeglobals`), not by the effective
+  default: registering our entry can already change that. `tests/fake_desktop.py` imitates xdg-utils on KDE.
 - Texts live in `locales/*.toml`, every key in every file.
 - Code, comments and commit messages are in English.
 - No personal data in the repository or its history.

@@ -14,6 +14,6 @@ def read_last(path: Path, tiles: list[Tile]) -> str:
 
 
 def save_last(path: Path, tile_id: str) -> None:
-    with contextlib.suppress(OSError):  # a choice not remembered is no reason not to open the link
+    with contextlib.suppress(OSError, ValueError):  # a choice not remembered is no reason not to open the link
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"{tile_id}\n", encoding="utf-8")

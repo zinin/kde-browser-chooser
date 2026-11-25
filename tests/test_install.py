@@ -14,7 +14,7 @@ SCRIPT = ROOT / "install.sh"
 APP = "kde-browser-chooser"
 OURS = f"{APP}.desktop"
 MIMES = ["x-scheme-handler/http", "x-scheme-handler/https", "text/html", "application/xhtml+xml"]
-CORE = ("sh awk cat chmod cp curl cut grep head mkdir mktemp mv rm sed sha256sum tr uname").split()
+CORE = ("sh awk cat chmod cp curl cut grep head mkdir mktemp mv rm rmdir sed sha256sum tr uname").split()
 ALL_OURS = dict.fromkeys([*MIMES, "kdeglobals"], OURS)
 ALL_CHROME = dict.fromkeys([*MIMES, "kdeglobals"], "chrome.desktop")
 

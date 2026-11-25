@@ -91,7 +91,7 @@ def load(path: Path) -> Config:
         table = tomllib.loads(path.read_text(encoding="utf-8-sig"))
     except FileNotFoundError:
         return Config()
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:
         raise ConfigError(str(error)) from error
     check_keys(table, {"language", "order", "hide", "rename", "tile"})
     return Config(language(table), tuple(texts(table, "order")), frozenset(texts(table, "hide")), rename(table),

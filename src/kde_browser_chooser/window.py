@@ -94,6 +94,4 @@ def pick(tiles: list[Tile], label: str, last: str, strings: Mapping[str, str]) -
     text.setText(text.fontMetrics().elidedText(label, Qt.TextElideMode.ElideRight, width))
     grid.addWidget(text, 0, 0, 1, per_row)
 
-    accepted = window.exec()
-    app.processEvents()  # the window is gone before the browser starts, or that would stay behind
-    return picked if accepted else None
+    return picked if window.exec() else None

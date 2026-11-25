@@ -19,7 +19,7 @@
 curl -fsSL https://raw.githubusercontent.com/zinin/kde-browser-chooser/master/install.sh | sh
 ```
 
-[install.sh](install.sh) берёт [последний релиз](https://github.com/zinin/kde-browser-chooser/releases/latest), сверяет его с `SHA256SUMS` и кладёт один файл в `~/.local/bin`. Если нет PyQt6, предлагает его поставить, а затем — сделать программу браузером по умолчанию. Права root нужны только для PyQt6. Та же команда обновляет программу.
+[install.sh](install.sh) берёт [последний релиз](https://github.com/zinin/kde-browser-chooser/releases/latest), сверяет его с `SHA256SUMS` и кладёт один файл в `~/.local/bin`. Он предлагает сделать программу браузером по умолчанию, а если нет PyQt6 — сначала поставить и его. Права root нужны только для PyQt6. Та же команда обновляет программу.
 
 Удалить программу и вернуть прежний браузер по умолчанию:
 
@@ -27,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/zinin/kde-browser-chooser/master/in
 curl -fsSL https://raw.githubusercontent.com/zinin/kde-browser-chooser/master/install.sh | sh -s -- --uninstall
 ```
 
-`--uninstall --purge` удаляет и настройки, `--yes` соглашается со всем предложенным, `--no-default` не трогает браузер по умолчанию. `KBC_VERSION=0.1.0` выбирает другой релиз, `KBC_INSTALL_DIR` — другой каталог.
+`--uninstall --purge` удаляет и настройки, `--yes` соглашается со всем предложенным, `--no-default` не трогает браузер по умолчанию, `--version 0.1.0` выбирает другой релиз. Другой каталог задаёт `KBC_INSTALL_DIR`: `curl … | KBC_INSTALL_DIR=/opt/bin sh`.
 
 ## Что нужно
 
@@ -58,7 +58,7 @@ command = "google-chrome-stable --profile-directory='Profile 1'"  # ссылки
 
 ## Какие браузеры он находит
 
-Все программы, чья запись `.desktop` открывает ссылки `https`, если запись не скрыта, не запускается в терминале и не предназначена другому рабочему столу. Две записи с одной командой — одна плитка. У Konqueror обработчик лежит в скрытой записи, поэтому добавьте его своей плиткой.
+Все программы, чья запись `.desktop` открывает ссылки `https` и передаёт их в `Exec`, если запись не скрыта, не запускается в терминале, не предназначена другому рабочему столу и не называет в `TryExec` отсутствующую программу. Две записи с одной командой — одна плитка. У Konqueror обработчик лежит в скрытой записи, поэтому добавьте его своей плиткой.
 
 ## Зачем токен KWin
 
@@ -77,7 +77,7 @@ command = "google-chrome-stable --profile-directory='Profile 1'"  # ссылки
 - **Ссылки открываются в прежнем браузере.** Перезапустите программу, в которой щёлкаете: она помнит старый браузер.
 - **Список вместо плиток.** Нет PyQt6; проверить: `/usr/bin/python3 -I -c 'import PyQt6.QtWidgets'`.
 - **«Не удалось запустить …»** Этот браузер переехал или удалён.
-- **Что-то ещё.** Выполните в терминале `kde-browser-chooser https://example.com` и прочтите вывод. Если ссылка щёлкнута в другой программе, смотрите `journalctl --user -b`.
+- **Что-то ещё.** Выполните в терминале `~/.local/bin/kde-browser-chooser https://example.com` и прочтите вывод. Если ссылка щёлкнута в другой программе, смотрите `journalctl --user -b`.
 
 ## Лицензия
 

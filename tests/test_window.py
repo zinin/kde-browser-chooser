@@ -248,18 +248,6 @@ def test_missing_icon_gets_the_default(icon_theme, icon):
     assert seen == ["#ff0000"]
 
 
-def test_window_is_gone_before_return():
-    seen = []
-
-    def pick(dialog):
-        dialog.finished.connect(lambda: QTimer.singleShot(0, lambda: seen.append("events delivered")))
-        click(dialog, "Firefox")
-
-    drive(pick)
-    assert visible_dialog() is None
-    assert seen == ["events delivered"]
-
-
 def test_desktop_file_name():
     seen = []
     drive(lambda d: seen.append(QGuiApplication.desktopFileName()))

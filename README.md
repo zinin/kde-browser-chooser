@@ -27,7 +27,7 @@ To remove the program and get your previous default browser back:
 curl -fsSL https://raw.githubusercontent.com/zinin/kde-browser-chooser/master/install.sh | sh -s -- --uninstall
 ```
 
-`--uninstall --purge` removes the settings too, `--yes` accepts every suggestion, and `--no-default` leaves the default browser alone. `KBC_VERSION=0.1.0` picks another release, and `KBC_INSTALL_DIR` another directory.
+`--uninstall --purge` removes the settings too, `--yes` accepts every suggestion, `--no-default` leaves the default browser alone, and `--version 0.1.0` picks another release. `KBC_INSTALL_DIR` names another directory: `curl … | KBC_INSTALL_DIR=/opt/bin sh`.
 
 ## Requirements
 
@@ -58,7 +58,7 @@ command = "google-chrome-stable --profile-directory='Profile 1'"  # links replac
 
 ## Which browsers it finds
 
-Every program whose desktop entry handles `https` links, unless the entry is hidden, runs in a terminal or is meant for another desktop. Two entries with the same command make one tile. Konqueror keeps its handler in a hidden entry, so add it as a tile of your own.
+Every program whose desktop entry handles `https` links and passes them in `Exec`, unless the entry is hidden, runs in a terminal, is meant for another desktop or names a missing program in `TryExec`. Two entries with the same command make one tile. Konqueror keeps its handler in a hidden entry, so add it as a tile of your own.
 
 ## Why it asks KWin for a token
 
@@ -77,7 +77,7 @@ On Wayland no window may come to the front by itself. The program you click a li
 - **Links still open in the old browser.** Restart the program you click them in: it remembers the old default.
 - **A list instead of tiles.** PyQt6 is missing: check with `/usr/bin/python3 -I -c 'import PyQt6.QtWidgets'`.
 - **"Could not start …"** That browser has moved or is gone.
-- **Anything else.** Run `kde-browser-chooser https://example.com` in a terminal and read what it says. For links clicked elsewhere, look into `journalctl --user -b`.
+- **Anything else.** Run `~/.local/bin/kde-browser-chooser https://example.com` in a terminal and read what it says. For links clicked elsewhere, look into `journalctl --user -b`.
 
 ## License
 
