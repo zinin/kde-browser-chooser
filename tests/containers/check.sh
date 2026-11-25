@@ -32,4 +32,4 @@ cat /tmp/stderr
 cat /src/install.sh | sh -s -- --uninstall
 [ ! -e "$program" ] && [ ! -e "$HOME/.local/share/applications/kde-browser-chooser.desktop" ]
 USER
-su tester -c 'sh /tmp/as-user.sh'
+sudo -H -u tester sh /tmp/as-user.sh

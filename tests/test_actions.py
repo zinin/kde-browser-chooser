@@ -67,10 +67,11 @@ def test_browser_inherits_no_descriptors(tmp_path):
     # Qt keeps /dev/dri/renderD128 open without O_CLOEXEC.
     (tmp_path / "secret").write_text("")
     before = (f"os.set_inheritable(os.open({str(tmp_path / 'secret')!r}, os.O_RDONLY), True)\n"
-              "os.dup2(os.open('/dev/null', os.O_RDONLY), 0)")
+              "os.dup2(os.open('/dev/null', os.O_RDONLY), 0)\n"
+              f"os.dup2(os.open({str(tmp_path / 'errors')!r}, os.O_WRONLY | os.O_CREAT), 2)")
     _, (out,) = run_in_child(tmp_path, ["browser", "%u"], ["u"], before)
     assert "secret" not in out
-    assert " 0 -> /dev/null" in out and " 1 -> " in out and " 2 -> " in out
+    assert " 0 -> /dev/null" in out and f" 2 -> {tmp_path}/errors" in out
 
 
 def test_launch_resolves_path_and_wrappers(tmp_path):

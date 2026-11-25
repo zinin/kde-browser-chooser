@@ -11,9 +11,10 @@ SCRIPT = ROOT / "install.sh"
 APP = "kde-browser-chooser"
 OURS = f"{APP}.desktop"
 KEYS = ["x-scheme-handler/http", "x-scheme-handler/https", "text/html", "application/xhtml+xml", "kdeglobals"]
-CORE = ("sh awk cat chmod cp curl cut grep head id mkdir mktemp mv rm sed sha256sum tr uname").split()
+CORE = ("sh awk cat chmod cp curl cut grep head mkdir mktemp mv rm sed sha256sum tr uname").split()
 
 FAKES = {
+    "id": "echo 1000",  # CI runs the tests as root
     # What xdg-settings does on KDE: http, https, text/html and kdeglobals.
     "xdg-settings": """
         [ "$2" = default-web-browser ] || exit 2
@@ -326,7 +327,6 @@ def test_without_a_terminal(home, options, want):
 
 
 def test_root_is_refused(home):
-    home.remove("id")
     home.fake("id", "echo 0")
     assert home.run("--yes") != 0
     assert "root" in home.output
