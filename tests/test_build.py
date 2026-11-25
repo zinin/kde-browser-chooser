@@ -89,18 +89,23 @@ import os, sys
 sys.path.insert(0, {str(archive)!r})
 from kde_browser_chooser import cli, desktop
 desktop.EXTRA_DATA_DIRS = ()
-from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QToolButton
-app = QApplication(["test"])
-def update_and_click():
-    os.replace({str(update)!r}, {str(archive)!r})
-    for widget in app.allWidgets():
-        if isinstance(widget, QToolButton) and widget.text() == "Fake":
-            QTest.mouseClick(widget, Qt.MouseButton.LeftButton)
-            return
-QTimer.singleShot(700, update_and_click)
-QTimer.singleShot(5000, lambda: os._exit(9))
+real = cli.window.pick
+def pick(*args):
+    global app
+    from PyQt6.QtCore import QTimer, Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QApplication, QToolButton
+    app = QApplication(["test"])
+    def update_and_click():
+        os.replace({str(update)!r}, {str(archive)!r})
+        for widget in app.allWidgets():
+            if isinstance(widget, QToolButton) and widget.text() == "Fake":
+                QTest.mouseClick(widget, Qt.MouseButton.LeftButton)
+                return
+    QTimer.singleShot(700, update_and_click)
+    QTimer.singleShot(5000, lambda: os._exit(9))
+    return real(*args)
+cli.window.pick = pick
 sys.exit(cli.main(["--", "https://e.com/"]))
 """
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "QT_QPA_PLATFORM": "offscreen", "LANG": "C.UTF-8",

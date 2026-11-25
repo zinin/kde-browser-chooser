@@ -66,6 +66,10 @@ def test_no_tiles_no_last(tmp_path):
     assert read_last(tmp_path / "last", []) == ""
 
 
+def test_odd_id_is_not_remembered(tmp_path):
+    save_last(tmp_path / "last", "\udcff")  # a file name that is not UTF-8
+
+
 def test_unwritable_state_is_ignored(tmp_path):
     (tmp_path / "file").write_text("")
     save_last(tmp_path / "file" / "last", "firefox")

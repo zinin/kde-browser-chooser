@@ -73,6 +73,15 @@ def test_not_utf8(tmp_path):
         load(tmp_path / "config.toml")
 
 
+def test_too_deep(write, monkeypatch):
+    def loads(_):
+        raise RecursionError("too deep")
+
+    monkeypatch.setattr("tomllib.loads", loads)
+    with pytest.raises(ConfigError, match="too deep"):
+        load(write(""))
+
+
 def test_bom_is_accepted(write):
     assert load(write("\ufeffhide = []")) == Config()
 

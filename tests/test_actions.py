@@ -31,19 +31,18 @@ def test_expand(command, urls, argvs):
     assert expand(command, urls) == argvs
 
 
-def run_in_child(tmp_path, command, urls, before="", path="/usr/bin:/bin"):
+def run_in_child(tmp_path, command, urls):
     """Calls actions.launch in another process; the fake browser reports to the file "out"."""
     browser = tmp_path / "browser"
     browser.write_text(
         "#!/bin/bash\n"
-        f"{{ echo \"$$ $* A=$A token=$XDG_ACTIVATION_TOKEN\"; /usr/bin/grep SigIgn /proc/self/status;"
-        f" /usr/bin/ls -l /proc/self/fd; }} > '{tmp_path}/'$$.part; /usr/bin/mv '{tmp_path}/'$$.part '{tmp_path}/'$$.out\n")
+        f"{{ echo \"$$ $* A=$A token=$XDG_ACTIVATION_TOKEN\"; /usr/bin/grep SigIgn /proc/self/status; }} > '{tmp_path}/'$$.part; /usr/bin/mv '{tmp_path}/'$$.part '{tmp_path}/'$$.out\n")
     browser.chmod(0o755)
-    child = (f"import ctypes, os, sys\nsys.path.insert(0, {str(SRC)!r})\n"
+    child = (f"import sys\nsys.path.insert(0, {str(SRC)!r})\n"
              "from kde_browser_chooser import actions\nfrom kde_browser_chooser.model import Tile\n"
-             f"{before}\nactions.launch(Tile('x', 'X', '', {tuple(command)!r}), {urls!r}, {{}})\n")
+             f"actions.launch(Tile('x', 'X', '', {tuple(command)!r}), {urls!r}, {{}})\n")
     process = subprocess.Popen([sys.executable, "-B", "-c", child],
-                               env={**os.environ, "PATH": f"{tmp_path}:{path}", "XDG_ACTIVATION_TOKEN": "abc"})
+                               env={**os.environ, "PATH": f"{tmp_path}:/usr/bin:/bin", "XDG_ACTIVATION_TOKEN": "abc"})
     assert process.wait(10) == 0
     deadline = time.monotonic() + 5
     while len(outs := sorted(tmp_path.glob("*.out"))) < max(1, len(urls) if "%u" in command else 1):
@@ -53,25 +52,12 @@ def run_in_child(tmp_path, command, urls, before="", path="/usr/bin:/bin"):
 
 
 def test_launch_replaces_process(tmp_path):
-    # Qt does this once it has shown the window.
-    before = 'ctypes.CDLL(None).unsetenv(b"XDG_ACTIVATION_TOKEN")'
-    pid, (out,) = run_in_child(tmp_path, [str(tmp_path / "browser"), "%U"], ["u1", "u2"], before)
+    pid, (out,) = run_in_child(tmp_path, [str(tmp_path / "browser"), "%U"], ["u1", "u2"])
     first, sigign, *_ = out.splitlines()
     assert first == f"{pid} u1 u2 A= token=abc"
     ignored = int(sigign.split()[1], 16)
     assert not ignored & (1 << 12), "SIGPIPE is still ignored"
     assert not ignored & (1 << 24), "SIGXFSZ is still ignored"
-
-
-def test_browser_inherits_no_descriptors(tmp_path):
-    # Qt keeps /dev/dri/renderD128 open without O_CLOEXEC.
-    (tmp_path / "secret").write_text("")
-    before = (f"os.set_inheritable(os.open({str(tmp_path / 'secret')!r}, os.O_RDONLY), True)\n"
-              "os.dup2(os.open('/dev/null', os.O_RDONLY), 0)\n"
-              f"os.dup2(os.open({str(tmp_path / 'errors')!r}, os.O_WRONLY | os.O_CREAT), 2)")
-    _, (out,) = run_in_child(tmp_path, ["browser", "%u"], ["u"], before)
-    assert "secret" not in out
-    assert " 0 -> /dev/null" in out and f" 2 -> {tmp_path}/errors" in out
 
 
 def test_launch_resolves_path_and_wrappers(tmp_path):
@@ -92,6 +78,12 @@ def test_missing_program_is_reported(fakes, urls):
     assert actions.launch(Tile("x", "Firefox", "", ("/nonexistent/firefox", "%u")), urls, STRINGS) == 1
     assert fakes.args("notify-send")[-2] == "No Firefox"
     assert "/nonexistent/firefox" in fakes.args("notify-send")[-1]
+
+
+def test_impossible_command_is_reported(fakes):
+    fakes.add("notify-send")
+    assert actions.launch(Tile("x", "Firefox", "", ("fire\0fox", "%u")), ["u"], STRINGS) == 1
+    assert fakes.args("notify-send")[-2] == "No Firefox"
 
 
 def test_copy_uses_wl_copy_first(fakes, monkeypatch):

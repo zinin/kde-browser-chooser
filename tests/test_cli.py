@@ -50,16 +50,17 @@ def last(session):
 def run(session, monkeypatch):
     """Runs main(); picked is a tile id, None for "Cancel", or an exception of the window."""
 
-    def run(argv, picked):
+    def run(argv, picked, token=None):
         run.shown, run.done = [], []
 
-        def pick(tiles, label, last, strings):
+        def show(function, tiles, label, last, strings):
+            assert function is cli.show_window
             run.shown.append((tiles, label, last, strings))
             if isinstance(picked, Exception):
                 raise picked
-            return next((tile for tile in tiles if tile.id == picked), None)
+            return [picked, token]
 
-        monkeypatch.setattr(cli.window, "pick", pick)
+        monkeypatch.setattr(cli.child, "run", show)
         monkeypatch.setattr(cli.actions, "launch", lambda tile, urls, s: run.done.append((tile.id, urls)) or 0)
         monkeypatch.setattr(cli.actions, "copy", lambda urls, s: run.done.append(("copy", urls)) or 0)
         return cli.main(argv)
@@ -99,6 +100,56 @@ def test_without_link(run):
 def test_one_link_has_no_counter(run):
     run([URL], None)
     assert run.shown[0][1] == URL
+
+
+def test_browser_gets_the_token_of_the_window(run, monkeypatch):
+    monkeypatch.setenv("XDG_ACTIVATION_TOKEN", "old")
+    run([URL], "chrome", token="fresh")
+    assert os.environ["XDG_ACTIVATION_TOKEN"] == "fresh"
+
+
+@pytest.mark.parametrize("picked", ["chrome", None])
+def test_window_returns_id_and_token(monkeypatch, picked):
+    def pick(tiles, *_):
+        os.environ["XDG_ACTIVATION_TOKEN"] = "fresh"
+        return tiles[0] if picked else None
+
+    monkeypatch.setenv("XDG_ACTIVATION_TOKEN", "old")
+    monkeypatch.setattr(cli.window, "pick", pick)
+    tile = cli.Tile("chrome", "Chrome", "", ("chrome", "%U"))
+    assert cli.show_window([tile], "", "", {}) == [picked, "fresh"]
+
+
+def test_crashed_window_falls_back(session, monkeypatch, fakes):
+    """Not even a crash in C++ loses the link."""
+    opened = []
+    fakes.add("kdialog", out="firefox\n")
+    monkeypatch.setattr(cli.window, "pick", lambda *_: os.kill(os.getpid(), signal.SIGKILL))
+    monkeypatch.setattr(cli.actions, "launch", lambda tile, urls, s: opened.append((tile.id, urls)) or 0)
+    assert cli.main([URL]) == 0
+    assert opened == [("firefox", [URL])]
+
+
+def test_qt_without_a_display_falls_back(session, fakes):
+    """Qt calls abort() then."""
+    pytest.importorskip("PyQt6.QtWidgets")
+    fakes.add("kdialog", code=1)
+    code = f"import resource; resource.setrlimit(resource.RLIMIT_CORE, (1, 1)); {CHILD}"  # no core dump
+    result = subprocess.run([sys.executable, "-B", "-c", code, URL], timeout=20, capture_output=True, text=True,
+                            env={**os.environ, "QT_QPA_PLATFORM": "nonexistent"})
+    assert result.returncode == 0, result.stderr
+    assert len(fakes.calls("kdialog")) == 1
+
+
+def test_anything_unexpected_is_told_with_the_link(run, fakes, monkeypatch):
+    fakes.add("notify-send")
+
+    def broken(*_):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(cli.desktop, "find_browsers", broken)
+    assert run([URL], None) == 1
+    assert fakes.args("notify-send")[-2:] == ["Could not show the browser chooser", URL]
 
 
 def test_falls_back_to_kdialog(run, fakes, last):
@@ -190,11 +241,22 @@ def test_dead_stderr_still_shows_kdialog(session, fakes):
 def test_ctrl_c_ends_the_program(session):
     pytest.importorskip("PyQt6.QtWidgets")
     ready = session / "ready"
-    child = (f"import sys; sys.path.insert(0, {str(SRC)!r})\n"
-             "from PyQt6.QtCore import QTimer\nfrom PyQt6.QtWidgets import QApplication\n"
-             "app = QApplication(['x'])\n"
-             f"QTimer.singleShot(200, lambda: open({str(ready)!r}, 'w').close())\n"
-             "from kde_browser_chooser.cli import run; run()\n")
+    child = f"""
+import os, sys
+sys.path.insert(0, {str(SRC)!r})
+from kde_browser_chooser import cli, window
+real = window.pick
+def pick(*args):
+    global app
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication(["x"])
+    QTimer.singleShot(200, lambda: os.rename({str(ready)!r} + ".part", {str(ready)!r}))
+    open({str(ready)!r} + ".part", "w").write(str(os.getpid()))
+    return real(*args)
+window.pick = pick
+cli.run()
+"""
     process = subprocess.Popen([sys.executable, "-B", "-c", child, URL])
     deadline = time.monotonic() + 10
     while not ready.exists():
@@ -202,6 +264,9 @@ def test_ctrl_c_ends_the_program(session):
         time.sleep(0.02)
     process.send_signal(signal.SIGINT)
     assert process.wait(1) == -signal.SIGINT
+    while Path("/proc", ready.read_text()).exists():
+        assert time.monotonic() < deadline, "the window is still there"
+        time.sleep(0.02)
 
 
 def test_all_modules_are_loaded_before_the_window():

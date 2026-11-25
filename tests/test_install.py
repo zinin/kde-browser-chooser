@@ -6,30 +6,20 @@ from pathlib import Path
 
 import pytest
 
+import fake_desktop
+from kde_browser_chooser import desktop as desktop_entry
+
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "install.sh"
 APP = "kde-browser-chooser"
 OURS = f"{APP}.desktop"
-KEYS = ["x-scheme-handler/http", "x-scheme-handler/https", "text/html", "application/xhtml+xml", "kdeglobals"]
+MIMES = ["x-scheme-handler/http", "x-scheme-handler/https", "text/html", "application/xhtml+xml"]
 CORE = ("sh awk cat chmod cp curl cut grep head mkdir mktemp mv rm sed sha256sum tr uname").split()
+ALL_OURS = dict.fromkeys([*MIMES, "kdeglobals"], OURS)
+ALL_CHROME = dict.fromkeys([*MIMES, "kdeglobals"], "chrome.desktop")
 
 FAKES = {
     "id": "echo 1000",  # CI runs the tests as root
-    # What xdg-settings does on KDE: http, https, text/html and kdeglobals.
-    "xdg-settings": """
-        [ "$2" = default-web-browser ] || exit 2
-        case $1 in
-        get) cat "$REGISTRY/kdeglobals" 2>/dev/null || echo ;;
-        set) for key in x-scheme-handler_http x-scheme-handler_https text_html kdeglobals; do
-                echo "$3" > "$REGISTRY/$key"; done ;;
-        esac""",
-    "xdg-mime": """
-        case $1 in
-        query) cat "$REGISTRY/$(echo "$3" | tr / _)" 2>/dev/null || true ;;
-        default) echo "$2" > "$REGISTRY/$(echo "$3" | tr / _)" ;;
-        esac""",
-    "kreadconfig6": 'cat "$REGISTRY/kdeglobals" 2>/dev/null || echo',
-    "kwriteconfig6": 'for last; do :; done; echo "$last" > "$REGISTRY/kdeglobals"',
     "plasmashell": "exit 0",
     "sudo": 'echo "sudo $*" >> "$REGISTRY/sudo"; [ -e "$REGISTRY/sudo-fails" ] || : > "$REGISTRY/pyqt6"',
     "python": """
@@ -49,6 +39,8 @@ class Home:
             directory.mkdir()
         for name in CORE:
             (self.bin / name).symlink_to(shutil.which(name))
+        for name in ("xdg-settings", "xdg-mime", "kwriteconfig6"):
+            (self.bin / name).symlink_to(ROOT / "tests/fake_desktop.py")
         for name in FAKES:
             self.fake(name)
         self.set("pyqt6")
@@ -57,7 +49,12 @@ class Home:
                     "XDG_CURRENT_DESKTOP": "KDE", "KBC_BASE_URL": f"file://{dist}", "KBC_TTY": str(self.answers),
                     "KBC_PYTHON": str(self.bin / "python"), "KBC_SYSROOT": str(root / "sysroot")}
 
+    @property
+    def desktop(self):
+        return fake_desktop.Desktop(self.env)
+
     def fake(self, name, body=None):
+        (self.bin / name).unlink(missing_ok=True)
         (self.bin / name).write_text(f"#!/bin/sh\n{body or FAKES[name]}\n")
         (self.bin / name).chmod(0o755)
 
@@ -66,24 +63,41 @@ class Home:
             (self.bin / name).unlink()
 
     def set(self, key, value=""):
-        (self.registry / key.replace("/", "_")).write_text(f"{value}\n")
+        (self.registry / key).write_text(f"{value}\n")
 
     def unset(self, key):
         (self.registry / key).unlink()
 
     def get(self, key):
         try:
-            return (self.registry / key.replace("/", "_")).read_text().strip()
+            return (self.registry / key).read_text().strip()
         except FileNotFoundError:
             return ""
 
+    def choose(self, values):
+        """What the user chose in System Settings."""
+        groups = fake_desktop.read(self.desktop.mimeapps)
+        chosen = groups.setdefault(fake_desktop.DEFAULTS, {})
+        for key, value in values.items():
+            if key == "kdeglobals":
+                self.desktop.browser(value)
+            elif value:
+                chosen[key] = value
+        fake_desktop.write(self.desktop.mimeapps, groups)
+
     def defaults(self):
-        return [self.get(key) for key in KEYS]
+        """The user's explicit choices."""
+        values = dict(fake_desktop.read(self.desktop.mimeapps).get(fake_desktop.DEFAULTS, {}))
+        return values | ({"kdeglobals": self.desktop.browser()} if self.desktop.browser() else {})
+
+    def traces(self):
+        return [path.name for path in (self.desktop.mimeapps, self.desktop.kdeglobals)
+                if path.exists() and OURS in path.read_text()]
 
     def add_entry(self, name):
-        path = self.home / ".local/share/applications" / name
+        path = self.desktop.apps / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("[Desktop Entry]\n")
+        path.write_text("[Desktop Entry]\nExec=/bin/sh %U\n")
 
     def run(self, *options, answers="", script=SCRIPT):
         self.answers.write_text(answers)
@@ -98,7 +112,7 @@ class Home:
 
     @property
     def entry(self):
-        return self.home / ".local/share/applications" / OURS
+        return self.desktop.apps / OURS
 
     @property
     def previous(self):
@@ -113,12 +127,19 @@ def dist(tmp_path_factory):
 
 
 @pytest.fixture
-def home(tmp_path, dist):
+def fresh(tmp_path, dist):
+    """A user who never chose a browser."""
     home = Home(tmp_path, dist)
-    for key in KEYS:
-        home.set(key, "chrome.desktop")
-    home.add_entry("chrome.desktop")
+    for name in ("chrome.desktop", "firefox.desktop", "kate.desktop"):
+        home.add_entry(name)
     return home
+
+
+@pytest.fixture
+def home(fresh):
+    """A user who chose Chrome for everything."""
+    fresh.choose(ALL_CHROME)
+    return fresh
 
 
 def test_installs_and_becomes_the_default(home, dist):
@@ -126,23 +147,45 @@ def test_installs_and_becomes_the_default(home, dist):
     assert home.program.read_bytes() == (dist / APP).read_bytes()
     assert home.program.stat().st_mode & 0o777 == 0o755
     assert f"Exec={home.program} -- %U" in home.entry.read_text().splitlines()
-    assert home.defaults() == [OURS] * 5
-    assert f"{APP} 0.1.0" in home.output
+    assert home.defaults() == ALL_OURS
+    assert f"{APP} 0.1.0" in home.output and "is the default browser now" in home.output
+
+
+@pytest.mark.parametrize("kind", ["system", "other", None])
+def test_becomes_the_default_where_none_was_chosen(fresh, kind):
+    """Registering our entry alone can make it the effective default, and that must not count."""
+    if kind:
+        fresh.set(kind, "chrome.desktop")
+    assert fresh.run(answers="y\n") == 0, fresh.output
+    assert fresh.defaults() == ALL_OURS
+    assert "Make it the default browser?" in fresh.output
+
+
+@pytest.mark.parametrize("kind", ["system", "other", None])
+def test_uninstall_leaves_nothing_where_none_was_chosen(fresh, kind):
+    if kind:
+        fresh.set(kind, "chrome.desktop")
+    fresh.run("--yes")
+    assert fresh.run("--uninstall") == 0, fresh.output
+    assert fresh.defaults() == {} and fresh.traces() == []
+    assert fresh.desktop.effective(MIMES[1]) == ("chrome.desktop" if kind else "")
+    assert ("System Settings" in fresh.output) is (kind is None)
 
 
 def test_enter_means_yes(home):
     home.run(answers="\n")
-    assert home.defaults() == [OURS] * 5
+    assert home.defaults() == ALL_OURS
 
 
-def test_answer_no(home):
-    assert home.run(answers="n\n") == 0
-    assert home.program.exists() and home.defaults() == ["chrome.desktop"] * 5 and not home.previous.exists()
+@pytest.mark.parametrize("answers", ["n\n", ""], ids=["no", "Ctrl+D"])
+def test_answer_no(home, answers):
+    assert home.run(answers=answers) == 0
+    assert home.program.exists() and home.defaults() == ALL_CHROME and not home.previous.exists()
 
 
 def test_no_default_option(home):
     assert home.run("--no-default", answers="y\n") == 0
-    assert home.program.exists() and home.defaults() == ["chrome.desktop"] * 5
+    assert home.program.exists() and home.defaults() == ALL_CHROME
 
 
 def test_bad_checksum_installs_nothing(home, dist, tmp_path):
@@ -162,66 +205,93 @@ def test_download_failure_installs_nothing(home):
     assert not home.program.exists()
 
 
+def test_an_update_that_does_not_run_leaves_the_old_program(home, dist, tmp_path):
+    home.run("--yes")
+    before = home.program.read_bytes()
+    broken = shutil.copytree(dist, tmp_path / "broken")
+    (broken / APP).write_text("#!/bin/sh\nexit 1\n")
+    sums = subprocess.run(["sha256sum", APP, OURS], cwd=broken, capture_output=True, text=True).stdout
+    (broken / "SHA256SUMS").write_text(sums)
+    home.env["KBC_BASE_URL"] = f"file://{broken}"
+    assert home.run("--yes") != 0
+    assert "does not run" in home.output and home.program.read_bytes() == before
+    assert [path.name for path in home.program.parent.iterdir()] == [APP]
+
+
 def test_truncated_script_does_nothing(home, tmp_path):
     text = SCRIPT.read_text()
     for part in (0.3, 0.6, 0.9, 0.99):
         (tmp_path / "part.sh").write_text(text[:int(len(text) * part)])
         home.run("--yes", script=tmp_path / "part.sh")
-        assert not home.program.exists() and home.defaults() == ["chrome.desktop"] * 5
+        assert not home.program.exists() and home.defaults() == ALL_CHROME
 
 
-def test_previous_defaults_saved_per_type(home):
-    home.set("text/html", "kate.desktop")
-    home.unset("application_xhtml+xml")
+def test_uninstall_restores_exactly(home):
+    chosen = ALL_CHROME | {"text/html": "kate.desktop;chrome.desktop;", "kdeglobals": "!/usr/bin/some-browser"}
+    home.choose(chosen)
     home.run("--yes")
-    assert home.previous.read_text() == (
-        "x-scheme-handler/http=chrome.desktop\nx-scheme-handler/https=chrome.desktop\n"
-        "text/html=kate.desktop\nkdeglobals=chrome.desktop\n")
+    assert home.defaults() == ALL_OURS
+    assert home.run("--uninstall") == 0, home.output
+    assert home.defaults() == chosen and home.traces() == []
+    assert not home.program.exists() and not home.entry.exists() and not home.previous.parent.exists()
+    assert "System Settings" not in home.output
+
+
+def test_uninstall_restores_only_what_is_still_ours(home):
+    home.run("--yes")
+    home.choose({"text/html": "kate.desktop"})
+    home.run("--uninstall")
+    assert home.defaults() == ALL_CHROME | {"text/html": "kate.desktop"}
 
 
 def test_reinstall_keeps_previous_defaults(home):
     home.run("--yes")
-    before = home.previous.read_text()
     home.run("--yes")
-    assert home.previous.read_text() == before
+    home.run("--uninstall")
+    assert home.defaults() == ALL_CHROME
 
 
 def test_previous_defaults_follow_the_user(home):
     """Installed, then the user chose Firefox, then installed again: Firefox comes back."""
     home.run("--yes")
-    for key in ("x-scheme-handler/http", "x-scheme-handler/https", "kdeglobals"):
-        home.set(key, "firefox.desktop")
+    home.choose({MIMES[0]: "firefox.desktop", MIMES[1]: "firefox.desktop", "kdeglobals": "firefox.desktop"})
     home.run("--yes")
-    assert home.previous.read_text() == (
-        "x-scheme-handler/http=firefox.desktop\nx-scheme-handler/https=firefox.desktop\n"
-        "text/html=chrome.desktop\napplication/xhtml+xml=chrome.desktop\nkdeglobals=firefox.desktop\n")
+    assert home.defaults() == ALL_OURS
+    home.run("--uninstall")
+    assert home.defaults() == ALL_CHROME | {MIMES[0]: "firefox.desktop", MIMES[1]: "firefox.desktop",
+                                            "kdeglobals": "firefox.desktop"}
 
 
-def test_uninstall_restores_what_is_still_ours(home):
+def test_other_settings_are_untouched(home):
+    home.desktop.mimeapps.write_text("# mine\n[Added Associations]\nimage/png=gimp.desktop;\n\n[Default Applications]\n"
+                                     "image/png=gwenview.desktop\n\n[Removed Associations]\nimage/png=x.desktop;\n")
     home.run("--yes")
-    home.set("text/html", "kate.desktop")
-    assert home.run("--uninstall") == 0, home.output
-    assert home.defaults() == ["chrome.desktop", "chrome.desktop", "kate.desktop", "chrome.desktop", "chrome.desktop"]
-    assert not home.program.exists() and not home.entry.exists() and not home.previous.parent.exists()
+    home.run("--uninstall")
+    groups = fake_desktop.read(home.desktop.mimeapps)
+    assert groups[fake_desktop.ADDED] == {"image/png": "gimp.desktop;"}
+    assert groups[fake_desktop.DEFAULTS] == {"image/png": "gwenview.desktop"}
+    assert groups["[Removed Associations]"] == {"image/png": "x.desktop;"}
+
+
+def test_linked_settings_stay_linked(home, tmp_path):
+    real = tmp_path / "dotfiles-mimeapps"
+    home.desktop.mimeapps.rename(real)
+    home.desktop.mimeapps.symlink_to(real)
+    home.run("--yes")
+    home.run("--uninstall")
+    assert home.desktop.mimeapps.is_symlink() and home.defaults() == ALL_CHROME
 
 
 def test_uninstall_when_the_previous_browser_is_gone(home):
     home.run("--yes")
-    (home.home / ".local/share/applications/chrome.desktop").unlink()
+    (home.desktop.apps / "chrome.desktop").unlink()
     assert home.run("--uninstall") == 0
-    assert "System Settings" in home.output and not home.program.exists()
-
-
-def test_uninstall_without_records(home):
-    home.run("--yes")
-    home.previous.unlink()
-    assert home.run("--uninstall") == 0
-    assert "System Settings" in home.output and not home.program.exists()
+    assert "System Settings" in home.output and home.traces() == [] and not home.program.exists()
 
 
 def test_uninstall_nothing(home):
     assert home.run("--uninstall") == 0
-    assert home.defaults() == ["chrome.desktop"] * 5
+    assert home.defaults() == ALL_CHROME
 
 
 @pytest.mark.parametrize("options, kept", [(["--uninstall"], True), (["--uninstall", "--purge"], False)])
@@ -234,23 +304,26 @@ def test_uninstall_and_settings(home, options, kept):
     assert config.exists() is kept
 
 
-def test_home_with_a_space(home, tmp_path):
-    spaced = tmp_path / "a b"
-    home.home.rename(spaced)
-    home.home = spaced
-    home.env["HOME"] = str(spaced)
+@pytest.mark.parametrize("name", ["a b", "user@corp.example", "иван", "50%", "a$b"])
+def test_unusual_home(home, tmp_path, name):
+    unusual = tmp_path / name
+    home.home.rename(unusual)
+    home.home = unusual
+    home.env["HOME"] = str(unusual)
     assert home.run("--yes") == 0, home.output
-    assert f'Exec="{spaced}/.local/bin/{APP}" -- %U' in home.entry.read_text().splitlines()
-    assert home.defaults() == [OURS] * 5
-    assert home.run("--uninstall") == 0 and not home.program.exists()
+    assert home.defaults() == ALL_OURS
+    line = next(line for line in home.entry.read_text().splitlines() if line.startswith("Exec="))
+    argv = desktop_entry.parse_exec(line.removeprefix("Exec="), icon="", name="", path="")
+    assert argv[-2:] == ("--", "%U") and argv[-3].replace("%%", "%") == f"{unusual}/.local/bin/{APP}"
+    assert home.run("--uninstall") == 0 and home.defaults() == ALL_CHROME
 
 
 def test_xdg_directories(home, tmp_path):
     home.env |= {"XDG_DATA_HOME": str(tmp_path / "d"), "XDG_STATE_HOME": str(tmp_path / "s"),
-                 "KBC_INSTALL_DIR": str(tmp_path / "i")}
+                 "XDG_CONFIG_HOME": str(tmp_path / "c"), "KBC_INSTALL_DIR": str(tmp_path / "i")}
     assert home.run("--yes") == 0, home.output
     assert (tmp_path / "i" / APP).exists() and (tmp_path / "d/applications" / OURS).exists()
-    assert (tmp_path / "s" / APP / "previous-defaults").exists()
+    assert (tmp_path / "s" / APP / "previous-defaults").exists() and home.defaults() == ALL_OURS
 
 
 def test_no_xdg_settings(home):
@@ -260,9 +333,9 @@ def test_no_xdg_settings(home):
 
 
 def test_default_that_did_not_take(home):
-    home.fake("xdg-settings", "case $1 in get) echo other.desktop;; esac")
+    home.fake("xdg-settings", "exit 4")
     assert home.run("--yes") == 0
-    assert "System Settings" in home.output
+    assert "System Settings" in home.output and home.defaults() == ALL_CHROME
 
 
 @pytest.mark.parametrize("manager, command", [
@@ -289,7 +362,7 @@ def test_package_that_did_not_install(home):
     home.set("sudo-fails")
     home.fake("apt-get", "exit 0")
     assert home.run("--yes") == 0
-    assert home.get("sudo") and home.program.exists() and home.defaults() == ["chrome.desktop"] * 5
+    assert home.get("sudo") and home.program.exists() and home.defaults() == ALL_CHROME
 
 
 def test_ostree_only_prints(home, tmp_path):
@@ -304,24 +377,24 @@ def test_ostree_only_prints(home, tmp_path):
 def test_without_window_and_list_it_is_never_the_default(home):
     home.unset("pyqt6")
     assert home.run("--yes", answers="y\ny\n") == 0
-    assert home.defaults() == ["chrome.desktop"] * 5
+    assert home.defaults() == ALL_CHROME
 
 
-@pytest.mark.parametrize("answer, want", [("", "chrome.desktop"), ("y", OURS)])
+@pytest.mark.parametrize("answer, want", [("", ALL_CHROME), ("y", ALL_OURS)])
 def test_with_only_kdialog_the_default_answer_is_no(home, answer, want):
     home.unset("pyqt6")
     home.fake("kdialog", "exit 0")
     assert home.run(answers=f"{answer}\n") == 0
-    assert home.defaults() == [want] * 5
+    assert home.defaults() == want
 
 
-@pytest.mark.parametrize("options, want", [([], "chrome.desktop"), (["--yes"], OURS)])
+@pytest.mark.parametrize("options, want", [([], ALL_CHROME), (["--yes"], ALL_OURS)])
 def test_without_a_terminal(home, options, want):
     home.env["KBC_TTY"] = "/nonexistent"
     home.unset("pyqt6")
     home.fake("apt-get", "exit 0")
     assert home.run(*options) == 0
-    assert home.program.exists() and home.defaults() == [want] * 5
+    assert home.program.exists() and home.defaults() == want
     assert bool(home.get("sudo")) is bool(options)
     assert ("--yes" in home.output) is not bool(options)
 
@@ -357,7 +430,7 @@ def test_not_kde_warns_and_asks(home, answers, installed):
 
 def test_plasma_without_session_variable(home):
     del home.env["XDG_CURRENT_DESKTOP"]
-    assert home.run("--yes") == 0 and home.defaults() == [OURS] * 5
+    assert home.run("--yes") == 0 and home.defaults() == ALL_OURS
 
 
 def test_update_asks_nothing_already_done(home):
@@ -391,7 +464,7 @@ def test_release_address(home, options, env, url):
     assert f"https://github.com/zinin/{APP}/{url}" in home.get("curl")
 
 
-@pytest.mark.parametrize("options", [["--oops"], ["--version"], ["extra"]])
+@pytest.mark.parametrize("options", [["--oops"], ["--version"], ["extra"], ["--purge"], ["--yes", "--purge"]])
 def test_bad_options(home, options):
     assert home.run(*options) != 0
     assert "Usage" in home.output and not home.program.exists()
