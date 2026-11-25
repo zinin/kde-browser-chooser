@@ -14,6 +14,11 @@ chosen one. Standard library and the distribution's PyQt6 only; everything else 
 
 ## Rules
 
+- While working on the code, never run `install.sh`, `xdg-settings`, `xdg-mime default` or `kwriteconfig6`
+  against the real home, start the program with a link, or show a window on the real display: that
+  changes or opens the user's own browsers. The tests isolate themselves. By hand, use a temporary home
+  and `QT_QPA_PLATFORM=offscreen` (unsetting `WAYLAND_DISPLAY` does not isolate: libwayland falls back to
+  `wayland-0`), `tests/kwin/nested.sh` or `tests/containers/run.sh`.
 - A link must never be lost silently: window, else kdialog, else a notification with the link. An
   exception in a Qt slot aborts the process, so slots catch everything.
 - `cli` imports every module of the package; PyQt6 is imported only inside `window.pick` and
