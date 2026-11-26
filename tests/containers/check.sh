@@ -43,6 +43,13 @@ settings() {
 	done | sort
 }
 
+# What opens each type now, chosen or not.
+effective() {
+	for type in $types; do
+		echo "$type=$(xdg-mime query default "$type" 2>/dev/null)"
+	done
+}
+
 run_installer() {
 	sh -s -- "$@" </src/install.sh
 }
@@ -79,6 +86,19 @@ if grep -q Traceback "$HOME/stderr"; then exit 1; fi
 run_installer --uninstall
 check_removed
 [ "$(xdg-mime query default x-scheme-handler/https 2>/dev/null)" = fakebrowser.desktop ]
+
+echo "== $HOME: not the default"
+# Our entry could take over a type that nobody chose just by being there.
+before=$(effective)
+run_installer --no-default
+"$program" --version >/dev/null
+if [ "$(effective)" != "$before" ]; then
+	printf 'before:\n%s\nafter:\n%s\n' "$before" "$(effective)"
+	exit 1
+fi
+run_installer --uninstall
+check_removed
+[ "$(effective)" = "$before" ]
 
 echo "== $HOME: a browser chosen"
 xdg-settings set default-web-browser fakebrowser.desktop 2>/dev/null
