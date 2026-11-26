@@ -7,7 +7,8 @@
 # ~/.local/bin and offers to install PyQt6 and to make the program the default
 # browser. Run it again to update. "| sh -s -- --uninstall" removes the program
 # and brings back the previous default browser. KBC_VERSION picks another release,
-# such as 0.1.0, and KBC_INSTALL_DIR another directory for the program.
+# such as 0.1.0, and KBC_INSTALL_DIR another directory for the program, an absolute
+# path that later runs remember.
 set -eu
 
 repo=zinin/kde-browser-chooser
@@ -184,6 +185,12 @@ place() {
 		at { $0 = substr($0, 1, at - 1) ENVIRON["EXEC"] substr($0, at + 6) }
 		{ print }' "$tmp/$ours" >"$apps_dir/.$ours.new"
 	mv -f "$apps_dir/.$ours.new" "$apps_dir/$ours"
+	if [ -n "$installed_in" ] && [ "$installed_in" != "$bin_dir" ]; then
+		rm -f "${installed_in:?}/${app:?}"
+		say "moved from $installed_in"
+	fi
+	mkdir -p "$state_dir"
+	printf '%s\n' "$bin_dir" >"$state_dir/install-dir"
 	refresh
 	say "$installed is in $bin_dir"
 	case ":$PATH:" in
@@ -410,7 +417,7 @@ uninstall() {
 	done
 	forget "$tmp/previous"
 	rm -f "${bin_dir:?}/${app:?}" "${apps_dir:?}/${ours:?}"
-	rm -f "${state_dir:?}/previous-defaults" "${state_dir:?}/last"
+	rm -f "${state_dir:?}/previous-defaults" "${state_dir:?}/last" "${state_dir:?}/install-dir"
 	rmdir "${state_dir:?}" 2>/dev/null || true
 	if [ "$purge" = 1 ]; then
 		rm -f "${config_home:?}/${app:?}/config.toml"
@@ -466,9 +473,15 @@ main() {
 
 	check_system
 	python=${KBC_PYTHON:-/usr/bin/python3}
-	bin_dir=${KBC_INSTALL_DIR:-$HOME/.local/bin}
 	apps_dir=${XDG_DATA_HOME:-$HOME/.local/share}/applications
 	state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/$app
+	case ${KBC_INSTALL_DIR:-/} in
+	/*) ;;
+	*) fail "KBC_INSTALL_DIR must be an absolute path, not $KBC_INSTALL_DIR" ;;
+	esac
+	# The program goes where it is told to, else where it went the last time.
+	installed_in=$(cat "$state_dir/install-dir" 2>/dev/null || :)
+	bin_dir=${KBC_INSTALL_DIR:-${installed_in:-$HOME/.local/bin}}
 	config_home=${XDG_CONFIG_HOME:-$HOME/.config}
 	mimeapps=$config_home/mimeapps.list
 	tmp=$(mktemp -d)

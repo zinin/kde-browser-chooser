@@ -448,6 +448,41 @@ def test_xdg_directories(home, tmp_path):
     assert (tmp_path / "s" / APP / "previous-defaults").exists() and home.defaults() == ALL_OURS
 
 
+def test_relative_install_dir_is_refused(home, tmp_path, monkeypatch):
+    """KDE would not find the program by a relative Exec."""
+    monkeypatch.chdir(tmp_path)  # where a relative directory would land
+    home.env["KBC_INSTALL_DIR"] = "relative/bin"
+    assert home.run("--yes") == 1
+    assert "KBC_INSTALL_DIR must be an absolute path" in home.output
+    assert not (tmp_path / "relative").exists() and not home.entry.exists() and home.defaults() == ALL_CHROME
+
+
+def test_update_and_uninstall_remember_the_install_dir(home, tmp_path):
+    custom = tmp_path / "my bin"
+    home.env["KBC_INSTALL_DIR"] = str(custom)
+    assert home.run("--yes") == 0, home.output
+    del home.env["KBC_INSTALL_DIR"]
+    assert home.run("--yes") == 0, home.output
+    assert (custom / APP).exists() and not home.program.exists()
+    line = next(line for line in home.entry.read_text().splitlines() if line.startswith("Exec="))
+    argv = desktop_entry.parse_exec(line.removeprefix("Exec="), icon="", name="", path="")
+    assert argv[-3].replace("%%", "%") == f"{custom}/{APP}"
+    assert home.run("--uninstall") == 0, home.output
+    assert not (custom / APP).exists() and not home.entry.exists() and not home.previous.parent.exists()
+
+
+def test_a_new_install_dir_takes_the_program_along(home, tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    home.env["KBC_INSTALL_DIR"] = str(first)
+    assert home.run("--yes") == 0, home.output
+    home.env["KBC_INSTALL_DIR"] = str(second)
+    assert home.run("--yes") == 0, home.output
+    assert (second / APP).exists() and not (first / APP).exists()
+    del home.env["KBC_INSTALL_DIR"]
+    assert home.run("--uninstall") == 0, home.output
+    assert not (second / APP).exists() and not home.program.exists()
+
+
 def test_no_xdg_settings(home):
     home.remove("xdg-settings")
     assert home.run("--yes") == 0
