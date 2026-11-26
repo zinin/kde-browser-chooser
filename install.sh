@@ -42,6 +42,12 @@ has() {
 	command -v "$1" >/dev/null 2>&1
 }
 
+# quiet runs the command $@ without its output.
+# shellcheck disable=SC2329 # called through keep_link
+quiet() {
+	"$@" >/dev/null 2>&1
+}
+
 # ask puts the question $1; the letter $2, y or n, is the answer of Enter and of --yes.
 ask() {
 	if [ "$yes" = 1 ]; then
@@ -250,9 +256,10 @@ make_default() {
 	ask "Make it the default browser?" "$suggested" || return 0
 	save_previous
 	mkdir -p "$config_home" # xdg-mime would lose its first change without it
-	keep_link xdg-settings set default-web-browser "$ours" >/dev/null 2>&1 || true
+	# quiet inside keep_link: what keep_link itself says must be seen.
+	keep_link quiet xdg-settings set default-web-browser "$ours" || true
 	if is_chosen; then
-		keep_link xdg-mime default "$ours" application/xhtml+xml >/dev/null 2>&1 || true
+		keep_link quiet xdg-mime default "$ours" application/xhtml+xml || true
 	else
 		say "that had no effect; make it the default browser in $by_hand."
 		return 0

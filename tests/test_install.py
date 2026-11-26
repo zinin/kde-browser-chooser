@@ -335,6 +335,16 @@ def test_linked_settings_stay_linked(home, tmp_path, relative):
     assert os.readlink(home.desktop.mimeapps) == link and home.defaults() == ALL_CHROME
 
 
+def test_a_link_that_cannot_be_put_back_is_told(home, tmp_path):
+    """xdg-utils have turned the link into a file, and the list it pointed to cannot be written."""
+    real = tmp_path / "dotfiles-mimeapps"
+    home.desktop.mimeapps.rename(real)
+    home.desktop.mimeapps.symlink_to(real)
+    (tmp_path / f".dotfiles-mimeapps.{APP}.part").mkdir()  # where the new list would be written
+    assert home.run("--yes") == 1
+    assert f"cannot write {real}" in home.output
+
+
 def test_unchanged_settings_are_not_rewritten(home):
     os.utime(home.desktop.mimeapps, ns=(0, 0))
     before = home.desktop.mimeapps.stat()
