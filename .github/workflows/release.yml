@@ -1,0 +1,56 @@
+name: release
+
+# A tag v* builds the program and publishes it in a release whose notes are the
+# message of the annotated tag. Run by hand, the workflow only builds it and
+# keeps the files as an artifact of the run.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl desktop-file-utils fonts-noto-core git \
+            libkf6windowsystem6 python3-pyqt6 python3-pytest
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: python3 -m pytest
+      - name: The tag names the version
+        if: github.ref_type == 'tag'
+        run: grep -qx "__version__ = \"${GITHUB_REF_NAME#v}\"" src/kde_browser_chooser/__init__.py
+      - run: python3 tools/build.py --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # checkout leaves the tag lightweight, and the notes are in the annotated one
+      - run: git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "kde-browser-chooser ${GITHUB_REF_NAME#v}" --notes-from-tag --verify-tag

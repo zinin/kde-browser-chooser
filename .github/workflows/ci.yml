@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl desktop-file-utils fonts-noto-core git \
+            libkf6windowsystem6 python3-pyqt6 python3-pytest shellcheck
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: shellcheck install.sh tests/*/*.sh
+      - run: python3 -m pytest
+      - run: python3 tools/build.py
+
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:26.04', 'debian:13', 'fedora:latest', 'archlinux:latest', 'opensuse/tumbleweed:latest']
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: tests/containers/run.sh "${{ matrix.image }}"
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color

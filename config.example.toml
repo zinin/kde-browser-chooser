@@ -1,0 +1,14 @@
+# Optional settings of kde-browser-chooser. Copy this file to
+# ~/.config/kde-browser-chooser/config.toml and keep only what you need.
+# "kde-browser-chooser --list" prints the ids.
+
+language = "ru"                                       # default: the language of the session
+order = ["copy", "google-chrome", "firefox_firefox"]  # the rest follow, by name
+hide = ["opera"]                                      # "copy" can be hidden too
+rename = { "yandex-browser" = "Yandex" }
+
+[[tile]]                                              # a tile of your own
+id = "chrome-work"                                    # default: made from the name
+name = "Chrome: work"
+icon = "google-chrome"                                # icon theme name or path; optional
+command = "google-chrome-stable --profile-directory='Profile 1'"  # links replace %u or %U, or go last
