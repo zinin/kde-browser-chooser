@@ -1,5 +1,6 @@
 import os
 import pkgutil
+import shutil
 import signal
 import subprocess
 import sys
@@ -19,12 +20,12 @@ CHROME = dict(Type="Application", Name="Google Chrome", Exec="chrome %U", Icon="
 
 
 @pytest.fixture
-def session(tmp_path, apps, env, monkeypatch):
-    """A desktop session with two browsers and nothing of the real user's."""
+def session(tmp_path, apps, env, fakes, monkeypatch):
+    """A desktop session with two browsers and nothing of the real user's: only fake programs are on PATH."""
     apps.add("chrome", **CHROME)
     apps.add("firefox", **{**CHROME, "Name": "Firefox", "Name[ru]": "Лиса", "Exec": "firefox %u", "Icon": "firefox"})
     env |= {"XDG_CONFIG_HOME": str(tmp_path / "config"), "XDG_STATE_HOME": str(tmp_path / "state"),
-            "LANG": "en_US.UTF-8"}
+            "LANG": "en_US.UTF-8", "PATH": str(fakes.bin)}
     for name in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "WAYLAND_DISPLAY"):
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
@@ -67,6 +68,14 @@ def run(session, monkeypatch):
         return cli.main(argv)
 
     return run
+
+
+def test_nothing_reaches_the_real_session(session):
+    """A broken window falls back to kdialog and notifications: in a test they must be fakes, and nothing a test
+    starts may find the user's display or session bus."""
+    assert [name for name in ("kdialog", "notify-send", "busctl", "gdbus", "wl-copy") if shutil.which(name)] == []
+    assert not {"DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"} & set(os.environ)
+    assert not Path(os.environ["XDG_RUNTIME_DIR"], "bus").exists()
 
 
 def test_opens_and_remembers(run, last):

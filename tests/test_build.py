@@ -108,7 +108,9 @@ def pick(*args):
 cli.window.pick = pick
 sys.exit(cli.main(["--", "https://e.com/"]))
 """
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "QT_QPA_PLATFORM": "offscreen", "LANG": "C.UTF-8",
+    no_programs = tmp_path / "no-programs"  # a fallback must not reach the real kdialog
+    no_programs.mkdir()
+    env = {"PATH": str(no_programs), "HOME": str(tmp_path), "QT_QPA_PLATFORM": "offscreen", "LANG": "C.UTF-8",
            "XDG_DATA_HOME": str(tmp_path / "data"), "XDG_DATA_DIRS": str(tmp_path / "none")}
     result = subprocess.run([sys.executable, "-I", "-c", driver], env=env, capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr

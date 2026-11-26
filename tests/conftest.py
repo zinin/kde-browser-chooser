@@ -20,6 +20,15 @@ done
 """
 
 
+@pytest.fixture(autouse=True)
+def no_real_session(tmp_path_factory, monkeypatch):
+    """Nothing a test starts finds the user's display or session bus. Without WAYLAND_DISPLAY libwayland would
+    still take wayland-0 from XDG_RUNTIME_DIR, and D-Bus its bus, so that is replaced too."""
+    for name in ("DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path_factory.mktemp("runtime")))
+
+
 class Apps:
     """Writes desktop entries into temporary XDG data directories."""
 
