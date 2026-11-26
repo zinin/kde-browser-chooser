@@ -483,6 +483,17 @@ def test_a_new_install_dir_takes_the_program_along(home, tmp_path):
     assert not (second / APP).exists() and not home.program.exists()
 
 
+@pytest.mark.parametrize("spelling", ["{dir}/", "{dir}/.", "{link}"], ids=["slash", "dot", "link"])
+def test_the_same_install_dir_named_otherwise_keeps_the_program(home, tmp_path, spelling):
+    real, link = tmp_path / "my bin", tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    home.env["KBC_INSTALL_DIR"] = str(real)
+    assert home.run("--yes") == 0, home.output
+    home.env["KBC_INSTALL_DIR"] = spelling.format(dir=real, link=link)
+    assert home.run("--yes") == 0, home.output
+    assert (real / APP).exists() and "moved" not in home.output
+
+
 def test_no_xdg_settings(home):
     home.remove("xdg-settings")
     assert home.run("--yes") == 0

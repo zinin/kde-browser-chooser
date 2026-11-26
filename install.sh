@@ -185,7 +185,10 @@ place() {
 		at { $0 = substr($0, 1, at - 1) ENVIRON["EXEC"] substr($0, at + 6) }
 		{ print }' "$tmp/$ours" >"$apps_dir/.$ours.new"
 	mv -f "$apps_dir/.$ours.new" "$apps_dir/$ours"
-	if [ -n "$installed_in" ] && [ "$installed_in" != "$bin_dir" ]; then
+	# A program moved to another directory leaves no copy behind. One directory can go by several names
+	# (a trailing slash, a link to it), so the directories are compared, not the names.
+	if [ -n "$installed_in" ] && [ -e "$installed_in/$app" ] &&
+		[ "$(cd "$installed_in" && pwd -P)" != "$(cd "$bin_dir" && pwd -P)" ]; then
 		rm -f "${installed_in:?}/${app:?}"
 		say "moved from $installed_in"
 	fi

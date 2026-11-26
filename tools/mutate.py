@@ -108,6 +108,8 @@ MUTATIONS = [
      '*) : "KBC_INSTALL_DIR must be an absolute path', "relative_install_dir"),
     ("../../install.sh", "the install directory is forgotten", 'installed_in=$(cat "$state_dir/install-dir" 2>/dev/null || :)',
      "installed_in=", "remember_the_install_dir"),
+    ("../../install.sh", "names of a directory are compared", '[ "$(cd "$installed_in" && pwd -P)" != "$(cd "$bin_dir" && pwd -P)" ]',
+     '[ "$installed_in" != "$bin_dir" ]', "named_otherwise"),
     ("../../install.sh", "a moved program leaves its old copy", '\t\trm -f "${installed_in:?}/${app:?}"\n', "",
      "takes_the_program_along"),
     ("../../install.sh", "a relative link becomes absolute", 'link_text=$(readlink -- "$mimeapps")', 'link_text=$(readlink -f -- "$mimeapps")', "stay_linked"),
