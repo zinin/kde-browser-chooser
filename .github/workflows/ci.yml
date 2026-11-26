@@ -35,3 +35,13 @@ jobs:
         with:
           persist-credentials: false
       - run: tests/containers/run.sh "${{ matrix.image }}"
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker://rhysd/actionlint:1.7.7
+        with:
+          args: -color
